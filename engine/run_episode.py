@@ -59,6 +59,7 @@ def main():
     ap.add_argument("--preset", default="표준")
     ap.add_argument("--offset", type=float)
     ap.add_argument("--skip-remux", action="store_true")
+    ap.add_argument("--segments", help="구간 JSON — 주면 카테고리·하이라이트까지 만든다")
     a = ap.parse_args()
 
     for p in (a.cam1, a.cam2):
@@ -117,7 +118,30 @@ def main():
     run([PY, os.path.join(HERE, "verify_episode.py"), a.cam1] +
         (["--cam2"] if a.cam2 else []))
 
+    # ── 7) 카테고리 + 하이라이트 (구간 JSON 이 있을 때만) ────────
+    # 구간 판단은 전사본을 읽고 사람(또는 Claude)이 해야 하는 일이라 자동화하지 않는다.
+    # --segments 없이 돌리면 여기서 안내만 하고 끝난다.
+    if a.segments:
+        step(7, "카테고리 + 하이라이트")
+        run([PY, os.path.join(HERE, "make_highlight.py"), a.cam1,
+             "--segments", a.segments])
+    else:
+        step(7, "카테고리 + 하이라이트 — 건너뜀")
+        print(f"   자막을 읽고 구간 JSON 을 만든 뒤 아래를 돌리면 된다:")
+        print(f"     python engine/make_highlight.py \"{a.cam1}\" \\")
+        print(f"       --segments output/{base}_segments.json")
+        print(f"   형식은 make_highlight.py 상단 주석 참고. Claude Code 에 "
+              f"'{base} 카테고리 나누고 15분 하이라이트' 라고 하면 만들어 준다.")
+
     print(f"\n{'='*66}\n완료 — 프리미어 조립")
+    if a.segments:
+        print(f"  [축약본]  {base}_final.edl        + _highlight_audio.wav + _highlight.srt")
+        print(f"  [전체]    {base}_full_labeled.edl + _cut_audio_flat.wav  + _cut.srt")
+        print(f"  둘 다 릴 CAM01 → {os.path.basename(tc1) if tc1 else 'TC0 사본'} 에 연결(1회). "
+              f"오디오는 A1 의 00:00:00:00.")
+        print(f"  자세한 순서·구간 근거: output/{base}_categories.md")
+        print(f"{'='*66}")
+        return
     print(f"  V1  {base}_cam01_v_tc0.edl   → CAM01 을 {os.path.basename(tc1) if tc1 else 'cam01 TC0 사본'} 에 연결")
     if a.cam2:
         print(f"  V2  {base}_cam02_v_tc0.edl   → CAM02 를 {os.path.basename(tc2) if tc2 else 'cam02 TC0 사본'} 에 연결")

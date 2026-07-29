@@ -163,10 +163,18 @@ def main():
     # _cut.xml 의 프레임 번호는 **소스 실제 fps** 단위다. 타임코드도 같은 fps 로 찍어야
     # 한다 — 59.94p 를 29.97 로 찍으면 모든 컷이 정확히 2배로 어긋난다.
     global FPS
-    FPS = probe_media(master)["fps"]
+    raw_fps = probe_media(master)["fps"]
+    # [중요] EDL 타임코드는 30프레임까지다. 59.94p 를 60프레임 TC 로 쓰면 프리미어가
+    # 프레임 필드 30 이상을 못 읽어 클립이 엉뚱한 자리에 놓인다 — 타임라인에 빈 공백이
+    # 생기고 오디오와 싱크가 어긋난다(실측). 관례대로 소스 2프레임 = TC 1프레임으로 접는다.
+    tcdiv = 2 if round(raw_fps) > 30 else 1
+    FPS = raw_fps / tcdiv
     nominal, drop = tc_rate()
-    print(f"소스 {FPS}fps → {nominal}프레임 타임코드 "
-          f"({'드롭프레임' if drop else '논드롭'})")
+    print(f"소스 {raw_fps}fps → {nominal}프레임 타임코드 "
+          f"({'드롭프레임' if drop else '논드롭'}"
+          + (f", 소스 {tcdiv}프레임 = TC 1프레임" if tcdiv > 1 else "") + ")")
+    if tcdiv > 1:                       # 프레임 값도 같은 기준으로 접는다
+        keeps = [(int(round(a / tcdiv)), int(round(b / tcdiv))) for a, b in keeps]
 
     m_tc = source_tc(master)
     m_base = df_to_frames(m_tc)

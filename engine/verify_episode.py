@@ -21,6 +21,7 @@ from silence_cut import probe_media
 # 소스 실제 fps 로 맞춘다. 상수 29.97 로 두면 59.94p 회차에서 오디오 길이와 EDL 소스
 # in/out 이 정확히 2배로 어긋나 '멀쩡한 산출물'을 FAIL 로 잡는다(실측).
 FPS = 30000 / 1001
+TCDIV = 1
 FAIL = []
 
 
@@ -52,11 +53,13 @@ def main():
     o = os.path.join(PROJ, "output")
     P = lambda s: os.path.join(o, base + s)
 
-    global FPS
+    global FPS, TCDIV
     if os.path.exists(master):
         FPS = probe_media(master)["fps"]
-        make_edl.FPS = FPS          # df_to_frames 가 같은 기준으로 EDL TC 를 읽도록
-        print(f"  (소스 {FPS}fps 기준으로 검증)")
+        # EDL 은 30프레임 TC 로 기록된다(59.94p 는 소스 2프레임 = TC 1프레임).
+        TCDIV = 2 if round(FPS) > 30 else 1
+        make_edl.FPS = FPS / TCDIV   # df_to_frames 가 EDL 과 같은 기준으로 읽도록
+        print(f"  (소스 {FPS}fps · EDL 은 {FPS/TCDIV:.2f}fps TC 기준으로 검증)")
 
     print("── 컷 / 타임라인")
     keeps = parse_keeps(P("_cut.xml"))
@@ -124,7 +127,9 @@ def main():
     if os.path.exists(e1):
         r1 = rows(e1)
         check(len(r1) == len(keeps), "cam01 이벤트 수 = 컷 수", f"{len(r1)} vs {len(keeps)}")
-        check(all((si, so) == k for (si, so, _a, _b), k in zip(r1, keeps)),
+        # EDL 은 TC 기준(59.94p 면 소스 2프레임=TC 1프레임)이라 컷도 같은 기준으로 접어 비교
+        keeps_tc = [(int(round(a / TCDIV)), int(round(b / TCDIV))) for a, b in keeps]
+        check(all((si, so) == k for (si, so, _a, _b), k in zip(r1, keeps_tc)),
               "cam01 소스 in/out = XML 컷")
         check(r1[0][2] == 0, "레코드 00:00:00:00 시작")
         check(all(r1[i][2] == r1[i-1][3] for i in range(1, len(r1))), "레코드 연속(갭 없음)")

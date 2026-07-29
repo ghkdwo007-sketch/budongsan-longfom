@@ -123,6 +123,29 @@ def srt_time(t):
     return f"{int(h):02d}:{int(m):02d}:{int(s):02d},{int(round((s % 1)*1000)):03d}"
 
 
+def _cut_wav(src, dst, placed, fps):
+    """placed = [(컷타임라인 시작프레임, 길이프레임)] 대로 플랫 WAV 를 이어붙인다.
+
+    EDL 이 선언한 클립 길이와 **같은 값**에서 잘라야 A/V 가 안 어긋난다.
+    구간(세그먼트) 단위로 자르면 스냅·반올림 차이가 쌓인다.
+    """
+    import wave
+    with wave.open(src, "rb") as w:
+        nch, sw, sr, nf = (w.getnchannels(), w.getsampwidth(),
+                           w.getframerate(), w.getnframes())
+        pcm = w.readframes(nf)
+    bpf = nch * sw
+    parts, tot = [], 0
+    for start_f, len_f in placed:
+        s0 = max(0, min(int(round(start_f / fps * sr)), nf))
+        s1 = max(s0, min(s0 + int(round(len_f / fps * sr)), nf))
+        parts.append(pcm[s0*bpf:s1*bpf]); tot += s1 - s0
+    with wave.open(dst, "wb") as w:
+        w.setnchannels(nch); w.setsampwidth(sw); w.setframerate(sr)
+        w.writeframes(b"".join(parts))
+    return tot, sr
+
+
 def main():
     if "--segments" not in sys.argv:
         print(__doc__); sys.exit(1)
@@ -180,45 +203,6 @@ def main():
     # EDL 은 아래 3) 에서 _final.edl 하나로만 낸다(예전 _highlight.edl 은 내용이 같아 폐지).
     print(f"\n── 하이라이트  {len(hl)}클립 · {hl_f/fps/60:.2f}분")
 
-    # 하이라이트 자막 — 남긴 구간만 골라 시간축을 당긴다
-    if os.path.exists(srt):
-        out, off = [], 0.0
-        for t0, t1 in cuts:
-            for a, b, tx in cues(srt):
-                if b <= t0 or a >= t1:
-                    continue
-                out.append((max(a, t0) - t0 + off, min(b, t1) - t0 + off, tx))
-            off += t1 - t0
-        hs = os.path.join(o, base + "_highlight.srt")
-        with open(hs, "w", encoding="utf-8") as f:
-            for i, (a, b, tx) in enumerate(out, 1):
-                f.write(f"{i}\n{srt_time(a)} --> {srt_time(b)}\n{tx}\n\n")
-        print(f"  자막 {len(out)}줄  {os.path.basename(hs)}")
-
-    # 하이라이트 오디오 — 본편 플랫 WAV 를 같은 구간으로 다시 자른다.
-    # (본편용 _cut_audio_flat.wav 는 21분짜리라 하이라이트 시퀀스에 못 쓴다)
-    flat = os.path.join(o, base + "_cut_audio_flat.wav")
-    if os.path.exists(flat):
-        import wave
-        with wave.open(flat, "rb") as w:
-            nch, sw, sr, nf = (w.getnchannels(), w.getsampwidth(),
-                               w.getframerate(), w.getnframes())
-            pcm = w.readframes(nf)
-        bpf = nch * sw
-        parts, tot = [], 0
-        for t0, t1 in cuts:
-            s0 = max(0, min(int(round(t0 * sr)), nf))
-            s1 = max(s0, min(int(round(t1 * sr)), nf))
-            parts.append(pcm[s0*bpf:s1*bpf]); tot += s1 - s0
-        ha = os.path.join(o, base + "_highlight_audio.wav")
-        with wave.open(ha, "wb") as w:
-            w.setnchannels(nch); w.setsampwidth(sw); w.setframerate(sr)
-            w.writeframes(b"".join(parts))
-        d = abs(tot/sr - hl_f/fps) * 1000
-        print(f"  오디오 {tot/sr/60:.2f}분  {os.path.basename(ha)}  (영상과 차이 {d:.1f}ms)")
-        if d > 50:
-            print("  [주의] 영상/오디오 길이 차가 큽니다 — 확인 필요")
-
     # ── 3) 단일 시퀀스 EDL — 카테고리를 '클립 이름'으로 ──────────────
     # 카테고리별 EDL 을 트랙에 쌓는 방식은 실패했다. 카테고리 경계가 컷 중간을 잘라
     # 클립이 산산조각 나고, 각 EDL 이 자기 구간만 갖고 나머지는 비어 있어 조립이 안 된다.
@@ -241,18 +225,37 @@ def main():
                 best, bw, bk = cat, w, kp
         return best, bk
 
+    # [중요] EDL 타임코드는 30프레임까지다.
+    # 59.94p 를 60프레임 타임코드(`00:00:20:58`)로 쓰면 프리미어가 프레임 필드 30 이상을
+    # 제대로 못 읽어 클립이 엉뚱한 자리에 놓인다 — 타임라인에 빈 공백이 생기고 오디오와
+    # 싱크가 어긋난다(실측). 관례대로 소스 2프레임 = TC 1프레임으로 접어 29.97 DF 로 쓴다.
+    tcdiv = 2 if round(fps) > 30 else 1
+    tc_fps = fps / tcdiv
+    if tcdiv > 1:
+        print(f"  타임코드: 소스 {fps}fps → {tc_fps:.2f}fps 기준 "
+              f"(소스 {tcdiv}프레임 = TC 1프레임)")
+
     def labeled(events, renumber, fname, title):
+        make_edl.FPS = tc_fps                       # 타임코드만 TC 기준으로
         fcm = "DROP FRAME" if tc_rate()[1] else "NON-DROP FRAME"
         out, rec, tally = [f"TITLE: {title}", f"FCM: {fcm}", ""], 0, {}
+        placed = []                                 # (오디오시작프레임, 길이프레임) — 소스 fps 단위
         for i, (si, so, ri) in enumerate(events, 1):
-            dur = so - si
-            r_in = rec if renumber else ri
+            # TC 격자에 맞춰 스냅. 영상·오디오·레코드가 모두 같은 값에서 나오므로
+            # 어긋날 여지가 없다.
+            si_t, so_t = int(round(si / tcdiv)), int(round(so / tcdiv))
+            if so_t <= si_t:
+                continue
+            dur = so_t - si_t
+            r_in = rec if renumber else int(round(ri / tcdiv))
             r_out = r_in + dur
             rec = r_out
-            cat, _ = dominant(ri, ri + dur)
-            tally[cat] = tally.get(cat, 0) + dur
+            # 스냅으로 소스 시작이 밀린 만큼 오디오도 같이 민다(A/V 잠금)
+            placed.append((ri + (si_t * tcdiv - si), dur * tcdiv))
+            cat, _ = dominant(ri, ri + (so - si))
+            tally[cat] = tally.get(cat, 0) + dur * tcdiv
             out.append(f"{i:03d}  {reel('CAM01')} V     C        "
-                       f"{frames_to_df(si)} {frames_to_df(so)} "
+                       f"{frames_to_df(si_t)} {frames_to_df(so_t)} "
                        f"{frames_to_df(r_in)} {frames_to_df(r_out)}")
             # [중요] FROM CLIP NAME 은 **모든 이벤트가 같아야 한다.**
             # 프리미어는 이 값으로 미디어 항목을 구분하므로, 클립마다 다른 이름을 주면
@@ -264,18 +267,57 @@ def main():
             out.append("")
         open(os.path.join(o, fname), "w", encoding="utf-8",
              newline="\r\n").write("\n".join(out) + "\n")
-        return tally
+        make_edl.FPS = fps                          # 원복
+        return tally, placed
+
 
     print("\n── 단일 시퀀스 (카테고리 = 클립 이름)")
     full_ev, acc = [], 0
     for a, b in keeps:
         full_ev.append((a, b, acc)); acc += b - a
-    t1 = labeled(full_ev, True, base + "_full_labeled.edl", f"{base} FULL")
+    t1, placed_full = labeled(full_ev, True, base + "_full_labeled.edl", f"{base} FULL")
     print(f"  본편   {len(full_ev):3d}클립 {acc/fps/60:5.2f}분  {base}_full_labeled.edl")
-    t2 = labeled(hl, True, base + "_final.edl", f"{base} FINAL")
+    t2, placed = labeled(hl, True, base + "_final.edl", f"{base} FINAL")
     print(f"  하이라이트 {len(hl):3d}클립 {hl_f/fps/60:5.2f}분  {base}_final.edl  ← 이걸 쓰면 됨")
     for cat, f_ in sorted(t2.items(), key=lambda x: -x[1]):
         print(f"      {clean(cat):<12} {f_/fps/60:5.2f}분")
+
+    # 자막·오디오는 EDL 이 선언한 클립 길이(placed)와 **같은 값**으로 만든다.
+    # 구간(세그먼트) 기준으로 따로 자르면 스냅·반올림이 어긋나 A/V 싱크가 밀린다.
+    if os.path.exists(srt):
+        cue = cues(srt)
+        out, off = [], 0.0
+        for start_f, len_f in placed:
+            t0, t1_ = start_f / fps, (start_f + len_f) / fps
+            for a_, b_, tx in cue:
+                if b_ <= t0 or a_ >= t1_:
+                    continue
+                out.append((max(a_, t0) - t0 + off, min(b_, t1_) - t0 + off, tx))
+            off += t1_ - t0
+        # 클립 경계마다 잘려 같은 자막이 토막나므로 다시 붙인다.
+        # (안 붙이면 76ms 짜리 조각이 수십 개 생긴다 — 실측 469줄 중 80줄)
+        merged = []
+        for a_, b_, tx in out:
+            if merged and merged[-1][2] == tx and a_ - merged[-1][1] < 0.08:
+                merged[-1][1] = b_
+            else:
+                merged.append([a_, b_, tx])
+        out = merged
+        hs = os.path.join(o, base + "_highlight.srt")
+        with open(hs, "w", encoding="utf-8") as f:
+            for i, (a_, b_, tx) in enumerate(out, 1):
+                f.write(f"{i}\n{srt_time(a_)} --> {srt_time(b_)}\n{tx}\n\n")
+        print(f"  자막 {len(out)}줄  {os.path.basename(hs)}")
+
+    flat = os.path.join(o, base + "_cut_audio_flat.wav")
+    if os.path.exists(flat):
+        ha = os.path.join(o, base + "_highlight_audio.wav")
+        tot, sr = _cut_wav(flat, ha, placed, fps)
+        vid = sum(l for _, l in placed) / fps
+        d = abs(tot / sr - vid) * 1000
+        print(f"  오디오 {tot/sr/60:.2f}분  {os.path.basename(ha)}  (영상과 차이 {d:.1f}ms)")
+        if d > 20:
+            print("  [주의] 영상/오디오 길이 차 — 확인 필요")
 
     # ── 4) 카테고리 표 ────────────────────────────────────────────
     md = [f"# {base} — 카테고리 / 하이라이트", "",

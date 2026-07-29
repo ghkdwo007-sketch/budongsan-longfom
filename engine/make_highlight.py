@@ -179,20 +179,69 @@ def main():
                 f.write(f"{i}\n{srt_time(a)} --> {srt_time(b)}\n{tx}\n\n")
         print(f"  자막 {len(out)}줄  {os.path.basename(hs)}")
 
+    # 하이라이트 오디오 — 본편 플랫 WAV 를 같은 구간으로 다시 자른다.
+    # (본편용 _cut_audio_flat.wav 는 21분짜리라 하이라이트 시퀀스에 못 쓴다)
+    flat = os.path.join(o, base + "_cut_audio_flat.wav")
+    if os.path.exists(flat):
+        import wave
+        with wave.open(flat, "rb") as w:
+            nch, sw, sr, nf = (w.getnchannels(), w.getsampwidth(),
+                               w.getframerate(), w.getnframes())
+            pcm = w.readframes(nf)
+        bpf = nch * sw
+        parts, tot = [], 0
+        for t0, t1 in cuts:
+            s0 = max(0, min(int(round(t0 * sr)), nf))
+            s1 = max(s0, min(int(round(t1 * sr)), nf))
+            parts.append(pcm[s0*bpf:s1*bpf]); tot += s1 - s0
+        ha = os.path.join(o, base + "_highlight_audio.wav")
+        with wave.open(ha, "wb") as w:
+            w.setnchannels(nch); w.setsampwidth(sw); w.setframerate(sr)
+            w.writeframes(b"".join(parts))
+        d = abs(tot/sr - hl_f/fps) * 1000
+        print(f"  오디오 {tot/sr/60:.2f}분  {os.path.basename(ha)}  (영상과 차이 {d:.1f}ms)")
+        if d > 50:
+            print("  [주의] 영상/오디오 길이 차가 큽니다 — 확인 필요")
+
     # ── 3) 카테고리 표 ────────────────────────────────────────────
     md = [f"# {base} — 카테고리 / 하이라이트", "",
           f"본편 {total_f/fps/60:.2f}분 · 하이라이트 {hl_f/fps/60:.2f}분", "",
-          "## 프리미어 조립", "",
-          "1. `_cam01_v_tc0.edl` 를 V1 에 올린다(본편 전체).",
-          "2. 아래 카테고리 EDL 을 각각 V2, V3 … 로 가져온다. 레코드 위치가 본편과",
-          "   같으므로 그대로 겹친다.",
-          "3. 트랙별로 클립 전체 선택 → 마우스 오른쪽 > 레이블 > 아래 색.", "",
+          "## 0) 먼저 — TC0 사본",
+          "",
+          "모든 EDL 이 **TC 0 기준**이다. 원본에 카메라 시계가 박혀 있으면 프리미어가",
+          "그 차이만큼 유령 클립을 만들어 컷이 전부 어긋난다. 재인코딩 없음(1~3분).",
+          "",
+          "```bash",
+          "ffmpeg -i 원본.MP4 -map 0:v:0 -map 0:a:0 -c copy \\",
+          "       -timecode 00:00:00:00 원본_TC0.MP4",
+          "```",
+          "",
+          "## 1) 본편 시퀀스 (카테고리 색 구분)",
+          "",
+          "1. `_cam01_v_tc0.edl` 가져오기 → 시퀀스가 생긴다. 오프라인 릴 **CAM01** 을",
+          "   `_TC0.MP4` 에 연결. 이게 본편(V1)이다.",
+          "2. `_cut_audio_flat.wav` 를 **A1 의 00:00:00:00** 에 올린다.",
+          "   V1 클립의 원본 오디오는 음소거 — EDL 에는 오디오가 없고 이 WAV 가 정리본이다.",
+          "3. `_cut.srt` 가져오기 → 캡션 트랙.",
+          "4. 아래 카테고리 EDL 을 각각 가져온다(EDL 하나 = 시퀀스 하나).",
+          "   각 시퀀스를 열어 **전체 선택 → 복사** → 본편 시퀀스의 해당 트랙에",
+          "   **00:00:00:00 기준으로 붙여넣기**. 레코드 위치가 본편과 같으므로 그대로 겹친다.",
+          "5. 트랙별로 클립 전체 선택 → 오른쪽 클릭 > 레이블 > 아래 색.",
+          "6. 색 확인이 끝나면 V2 이상은 숨기거나 지운다 — **실제 편집본은 V1** 이다.",
+          "7. 타임라인 전체 선택 → `Cmd/Ctrl+Shift+D` (컷 클릭음 제거).",
+          "",
           "| 트랙 | 카테고리 | 레이블 색 | 클립 | 길이 | EDL |",
           "|---|---|---|---|---|---|"]
     for i, cat, col, n, dur, f_ in rows:
         md.append(f"| V{i+1} | {cat} | {col} | {n} | {dur/60:.2f}분 | `{f_}` |")
-    md += ["", "## 하이라이트", "",
-           f"`{base}_highlight.edl` · `{base}_highlight.srt` — {hl_f/fps/60:.2f}분", ""]
+    md += ["", "## 2) 하이라이트 시퀀스 (별도)", "",
+           f"본편과 **다른 시퀀스**로 만든다. 길이 {hl_f/fps/60:.2f}분.", "",
+           f"1. `{base}_highlight.edl` 가져오기 → 릴 **CAM01** 을 `_TC0.MP4` 에 연결.",
+           f"2. `{base}_highlight_audio.wav` 를 **A1 의 00:00:00:00** 에.",
+           "   (본편용 `_cut_audio_flat.wav` 는 길이가 달라서 안 맞는다)",
+           f"3. `{base}_highlight.srt` 가져오기 — 하이라이트 시간축에 맞춰 재생성된 자막이다.",
+           "4. 전체 선택 → `Cmd/Ctrl+Shift+D`.", "",
+           "### 구간 (○ 남김 / ✕ 제외)", ""]
     for s in segs:
         mark = "○" if s.get("keep", True) else "✕"
         md.append(f"- {mark} `{s['start']}–{s['end']}` **{s['cat']}** — {s.get('note','')}")

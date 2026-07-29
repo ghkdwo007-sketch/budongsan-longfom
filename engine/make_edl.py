@@ -173,6 +173,12 @@ def main():
     m_len = int(round(probe_media(master)["duration"] * FPS))
     print(f"컷 {len(keeps)}개 · 마스터 시작 TC {m_tc} (프레임 {m_base}, 길이 {m_len})")
 
+    # tc0 변형은 TC0 리먹스 사본에 연결한다. 클립 이름을 그 파일명과 같게 두면
+    # '미디어 연결' 대화상자가 파일을 자동으로 찾는다. (이름은 모든 이벤트가 같아야
+    # 한다 — 다르면 프리미어가 이벤트마다 별개 오프라인 항목으로 잡는다)
+    _tc0 = os.path.join(os.path.dirname(os.path.abspath(master)), base + "_TC0.MP4")
+    tc0_name = os.path.basename(_tc0) if os.path.exists(_tc0) else os.path.basename(master)
+
     written = []
 
     def emit(fname, title, tracks, note):
@@ -194,12 +200,12 @@ def main():
     # 못 살리고 매 컷마다 0부터 재생한다(실측). 오디오는 make_cut_audio.py 로 만든
     # '컷 적용된 단일 WAV'를 타임라인 0에 한 번만 올린다.
     emit(base + "_cam01_v_tc0.edl", f"{base} CAM01 V TC0",
-         [("V", "CAM01", 0, 0, m_len)], os.path.basename(master))
+         [("V", "CAM01", 0, 0, m_len)], tc0_name)
     emit(base + "_cam01_v.edl", f"{base} CAM01 V",
          [("V", "CAM01", m_base, m_base, m_len)], os.path.basename(master))
     # 카메라 원본 오디오까지 한 릴에서 받고 싶을 때(음량정리 없음)
     emit(base + "_cam01_av_tc0.edl", f"{base} CAM01 AV TC0",
-         [("AA/V", "CAM01", 0, 0, m_len)], os.path.basename(master))
+         [("AA/V", "CAM01", 0, 0, m_len)], tc0_name)
 
     # 3) cam02 = 같은 레코드 타임라인, 소스만 오프셋만큼 당김
     if cam2:

@@ -11,14 +11,19 @@ make_highlight.py — 컷 결과를 '카테고리를 붙인 단일 시퀀스' �
   <base>_highlight_audio.wav 축약본 길이에 맞춘 정리 오디오
   <base>_categories.md      구간 판단 근거 + 조립 순서
 
-카테고리는 **클립 이름**으로 넣는다(`사례일화_037`). 프리미어가 * FROM CLIP NAME 을
-클립 이름으로 읽으므로 타임라인에서 바로 구분되고, 이름으로 묶어 선택해 레이블 색을
-줄 수도 있다.
+[핵심] `* FROM CLIP NAME` 은 **모든 이벤트가 같아야 한다.**
+프리미어는 이 값으로 미디어 항목을 구분하므로, 값이 다르면 이벤트 수만큼 별개
+오프라인 클립이 생겨 '미디어 연결'을 클립 수만큼 손으로 해야 한다. 그래서 이름은
+실제 연결할 파일명(TC0 사본) 하나로 통일한다 — 이러면 연결이 한 번에 끝나고,
+이름이 디스크의 파일과 같아 프리미어가 자동으로 찾아준다.
+카테고리는 연결에 영향 없는 `* COMMENT:` 로 넣고, 구간 표는 _categories.md 에 있다.
 
-[하지 말 것] 카테고리마다 EDL 을 따로 뽑아 V2·V3… 에 쌓는 방식.
-처음에 그렇게 만들었다가 실패했다 — 카테고리 경계가 컷 중간을 잘라 104컷이 129조각이
-되고, 각 EDL 이 자기 구간만 갖고 나머지는 비어 있어 타임라인이 알아볼 수 없게 된다.
-그래서 컷은 쪼개지 않고, 각 컷을 '가장 많이 겹치는 카테고리'에 통째로 배정한다.
+두 번 실패한 접근(다시 하지 말 것):
+ 1) 카테고리마다 EDL 을 뽑아 V2·V3… 에 쌓기 — 카테고리 경계가 컷 중간을 잘라
+    104컷이 129조각이 되고, 각 EDL 이 자기 구간만 갖고 나머지는 비어 조립이 안 된다.
+ 2) 카테고리를 클립 이름에 넣기(`사례일화_037`) — 타임라인 구분은 되지만 위 이유로
+    미디어 연결이 클립마다 따로 필요해진다. 연결 편의가 우선이다.
+컷은 쪼개지 않고, 각 컷을 '가장 많이 겹치는 카테고리'에 통째로 배정한다.
 
 전제: auto_cut.py 로 output/<base>_cut.xml · <base>_cut.srt 가 있어야 한다.
 
@@ -140,6 +145,13 @@ def main():
     segs = spec["segments"]
     colors = spec.get("categories", {})
     note = os.path.basename(master)
+
+    # 실제로 프리미어에 연결할 파일. 표준 워크플로는 TC0 리먹스 사본이므로, 그게 있으면
+    # 그 파일명을 클립 이름으로 쓴다 — 이름이 디스크의 파일과 같아야 '미디어 연결'에서
+    # 프리미어가 알아서 찾아준다.
+    tc0 = os.path.join(os.path.dirname(os.path.abspath(master)), base + "_TC0.MP4")
+    link_name = os.path.basename(tc0) if os.path.exists(tc0) else note
+    print(f"클립 이름(연결 대상) = {link_name}")
     print(f"소스 {fps}fps · 컷 {len(keeps)}개 · 본편 {total_f/fps/60:.2f}분")
 
     # ── 1) 카테고리 레이어 EDL (레코드 위치 유지) ─────────────────
@@ -165,10 +177,8 @@ def main():
         hl.extend(slice_timeline(keeps, t0, t1, fps))
         cuts.append((t0, t1))
     hl_f = sum(b - a for a, b, _ in hl)
-    fn = f"{base}_highlight.edl"
-    open(os.path.join(o, fn), "w", encoding="utf-8", newline="\r\n").write(
-        build_edl(f"{base} HIGHLIGHT", hl, "CAM01", note, renumber_record=True))
-    print(f"\n── 하이라이트\n  {len(hl)}클립 · {hl_f/fps/60:.2f}분  {fn}")
+    # EDL 은 아래 3) 에서 _final.edl 하나로만 낸다(예전 _highlight.edl 은 내용이 같아 폐지).
+    print(f"\n── 하이라이트  {len(hl)}클립 · {hl_f/fps/60:.2f}분")
 
     # 하이라이트 자막 — 남긴 구간만 골라 시간축을 당긴다
     if os.path.exists(srt):
@@ -244,7 +254,13 @@ def main():
             out.append(f"{i:03d}  {reel('CAM01')} V     C        "
                        f"{frames_to_df(si)} {frames_to_df(so)} "
                        f"{frames_to_df(r_in)} {frames_to_df(r_out)}")
-            out.append(f"* FROM CLIP NAME: {clean(cat)}_{i:03d}")
+            # [중요] FROM CLIP NAME 은 **모든 이벤트가 같아야 한다.**
+            # 프리미어는 이 값으로 미디어 항목을 구분하므로, 클립마다 다른 이름을 주면
+            # (카테고리를 여기 넣었다가 실패) 93개가 전부 별개 오프라인 항목이 되어
+            # 미디어 연결을 클립 수만큼 손으로 해야 한다. 이름은 실제 연결할 파일명과
+            # 같게 둬서 프리미어가 자동으로 찾게 한다.
+            out.append(f"* FROM CLIP NAME: {link_name}")
+            out.append(f"* COMMENT: {clean(cat)}")     # 연결에는 영향 없는 참고용
             out.append("")
         open(os.path.join(o, fname), "w", encoding="utf-8",
              newline="\r\n").write("\n".join(out) + "\n")

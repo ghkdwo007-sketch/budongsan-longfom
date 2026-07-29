@@ -17,9 +17,10 @@ make_cut_audio.py — 정리 오디오를 '컷이 적용된 한 덩어리 WAV'�
 import sys, os, re, subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from silence_cut import FFMPEG, FFPROBE, run
+from silence_cut import FFMPEG, FFPROBE, run, probe_media
 
-NTSC_FPS = 30000 / 1001
+# 프레임→샘플 변환은 반드시 **소스 실제 fps** 로 해야 한다. 상수로 29.97 을 쓰면
+# 59.94p 촬영본에서 오디오가 정확히 2배로 어긋난다(_cut.xml 의 프레임은 소스 fps 단위).
 
 
 def parse_keeps(cut_xml):
@@ -52,6 +53,9 @@ def main():
     if not keeps:
         print("keep 구간을 못 읽음"); sys.exit(2)
 
+    fps = probe_media(master)["fps"]
+    print(f"  소스 {fps}fps 기준으로 프레임→샘플 변환")
+
     # 샘플 단위로 직접 자른다. ffmpeg concat 디먹서의 inpoint/outpoint 는 구간마다
     # 수십 ms 씩 밀려(실측 285구간에 12.6초 초과) 컷과 안 맞는다.
     import wave
@@ -61,7 +65,7 @@ def main():
     bpf = nch * sw                                   # 샘플프레임당 바이트
 
     def smp(video_frame):                            # 영상 프레임 → 오디오 샘플 인덱스
-        return int(round(video_frame / NTSC_FPS * sr))
+        return int(round(video_frame / fps * sr))
 
     parts, total = [], 0
     for a, b in keeps:
@@ -78,7 +82,7 @@ def main():
         print("생성 실패"); sys.exit(3)
 
     total_f = sum(b - a for a, b in keeps)
-    want = total_f / NTSC_FPS
+    want = total_f / fps
     got = float(run([FFPROBE, "-v", "error", "-show_entries", "format=duration",
                      "-of", "default=nw=1:nk=1", out_wav]).stdout.strip())
     print(f"생성: {os.path.basename(out_wav)}")
@@ -87,7 +91,7 @@ def main():
     if abs(got - want) > 0.05:
         print("  [주의] 길이 차가 큽니다 — 확인 필요")
     else:
-        print("  길이 일치 (프레임 1개 = 33.4ms 기준 안전)")
+        print(f"  길이 일치 (프레임 1개 = {1000/fps:.1f}ms 기준 안전)")
     print("\n프리미어: 이 WAV 를 오디오 트랙 00:00:00:00 에 그대로 올리면 컷과 맞습니다.")
 
 

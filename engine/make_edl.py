@@ -22,27 +22,46 @@ import sys, os, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from silence_cut import probe_media, FFPROBE, run
 
-NTSC_FPS = 30000 / 1001
+NTSC_FPS = 30000 / 1001            # 기본값(29.97). 실제 소스 fps 는 main() 이 FPS 에 넣는다.
+FPS = NTSC_FPS
 
 
-# ── 드롭프레임 타임코드 ──────────────────────────────────────────────
-def df_to_frames(tc):
-    """'HH:MM:SS;FF' 또는 'HH:MM:SS:FF' (29.97 DF) → 프레임 번호."""
+def tc_rate(fps=None):
+    """(공칭프레임수, 분당드롭수) — 드롭프레임은 NTSC(29.97·59.94)에만 쓴다.
+
+    59.94 는 분당 4프레임을 떨어뜨린다(29.97 의 2프레임과 같은 비율). 25p·24p·정수
+    30p 는 드롭프레임이 없으므로 drop=0 → 논드롭 타임코드가 된다.
+    """
+    fps = FPS if fps is None else fps
+    nominal = int(round(fps))
+    drop = nominal // 15 if (nominal in (30, 60) and abs(fps - nominal) > 1e-3) else 0
+    return nominal, drop
+
+
+# ── 타임코드 ────────────────────────────────────────────────────────
+def df_to_frames(tc, fps=None):
+    """'HH:MM:SS;FF' 또는 'HH:MM:SS:FF' → 프레임 번호."""
+    n, d = tc_rate(fps)
     h, m, s, f = (int(x) for x in re.split(r"[:;]", tc.strip()))
     total_min = 60 * h + m
-    return (108000 * h + 1800 * m + 30 * s + f) - 2 * (total_min - total_min // 10)
+    return ((3600 * n * h + 60 * n * m + n * s + f)
+            - d * (total_min - total_min // 10))
 
 
-def frames_to_df(fr, sep=":"):
-    """프레임 번호 → 29.97 드롭프레임 타임코드."""
+def frames_to_df(fr, sep=":", fps=None):
+    """프레임 번호 → 타임코드(드롭프레임이면 드롭 보정 포함)."""
+    n, d = tc_rate(fps)
     if fr < 0:
         fr = 0
-    d, m = divmod(fr, 17982)              # 10분 = 17982 프레임(DF)
-    if m < 2:
-        m += 2
-    fr += 18 * d + 2 * ((m - 2) // 1798)
-    return (f"{(fr // 108000) % 24:02d}{sep}{(fr // 1800) % 60:02d}"
-            f"{sep}{(fr // 30) % 60:02d}{sep}{fr % 30:02d}")
+    if d:
+        fp10 = 600 * n - 9 * d            # 10분: 29.97=17982 · 59.94=35964
+        fpm = 60 * n                      # 1분(공칭): 1800 · 3600
+        q, m = divmod(fr, fp10)
+        if m < d:
+            m += d
+        fr += 9 * d * q + d * ((m - d) // (fpm - d))
+    return (f"{(fr // (3600 * n)) % 24:02d}{sep}{(fr // (60 * n)) % 60:02d}"
+            f"{sep}{(fr // n) % 60:02d}{sep}{fr % n:02d}")
 
 
 def source_tc(path):
@@ -84,7 +103,8 @@ def build(title, keeps, tracks, path_note):
     카메라마다 완전히 동일해야 레이어를 겹쳐 교차편집할 수 있기 때문이다.
     클램프된 이벤트는 그 클립만 내용이 최대 1초 어긋나므로 호출부에서 보고한다.
     """
-    out = [f"TITLE: {title}", "FCM: DROP FRAME", ""]
+    fcm = "DROP FRAME" if tc_rate()[1] else "NON-DROP FRAME"
+    out = [f"TITLE: {title}", f"FCM: {fcm}", ""]
     rec, clamped = 0, []
     n = 0
     for a, b in keeps:
@@ -140,9 +160,17 @@ def main():
     if not keeps:
         print("keep 구간을 못 읽음:", cut_xml); sys.exit(2)
 
+    # _cut.xml 의 프레임 번호는 **소스 실제 fps** 단위다. 타임코드도 같은 fps 로 찍어야
+    # 한다 — 59.94p 를 29.97 로 찍으면 모든 컷이 정확히 2배로 어긋난다.
+    global FPS
+    FPS = probe_media(master)["fps"]
+    nominal, drop = tc_rate()
+    print(f"소스 {FPS}fps → {nominal}프레임 타임코드 "
+          f"({'드롭프레임' if drop else '논드롭'})")
+
     m_tc = source_tc(master)
     m_base = df_to_frames(m_tc)
-    m_len = int(round(probe_media(master)["duration"] * NTSC_FPS))
+    m_len = int(round(probe_media(master)["duration"] * FPS))
     print(f"컷 {len(keeps)}개 · 마스터 시작 TC {m_tc} (프레임 {m_base}, 길이 {m_len})")
 
     written = []
@@ -155,7 +183,7 @@ def main():
 
     # 자정을 넘는 소스는 TC가 23:59:59:29 → 00:00:00:00 으로 되돌아가, EDL 이벤트의
     # 소스 TC가 미디어 시작 TC보다 작아진다(= 매칭 실패). 그런 경우 0 기준 버전을 같이 낸다.
-    wraps = (m_base + m_len) > df_to_frames("23:59:59:29") + 1
+    wraps = (m_base + m_len) > df_to_frames(f"23:59:59:{nominal - 1:02d}") + 1
     if wraps:
         print(f"  [주의] 마스터가 자정을 넘어감 ({m_tc} + {m_len}프레임)")
     # TC0 변형은 자정 넘김과 무관하게 **항상** 만든다. 표준 워크플로가 TC0 리먹스 사본을
@@ -177,8 +205,8 @@ def main():
     if cam2:
         c_tc = source_tc(cam2)
         c_base = df_to_frames(c_tc)
-        c_len = int(round(probe_media(cam2)["duration"] * NTSC_FPS))
-        shift = int(round(off2 * NTSC_FPS))       # cam2가 늦게 시작한 프레임 수
+        c_len = int(round(probe_media(cam2)["duration"] * FPS))
+        shift = int(round(off2 * FPS))       # cam2가 늦게 시작한 프레임 수
         print(f"cam02 시작 TC {c_tc} (프레임 {c_base}, 길이 {c_len}) · 오프셋 {off2}s = {shift}프레임")
         emit(base + "_cam02_v_tc0.edl", f"{base} CAM02 V TC0",
              [("V", "CAM02", -shift, 0, c_len)], os.path.basename(cam2))
@@ -190,7 +218,7 @@ def main():
     for p, n, cl in written:
         print(f"  생성: {os.path.basename(p)}  ({n}이벤트)")
         for ev, rl, d in cl:
-            print(f"      [클램프] 이벤트 {ev:03d} {rl}: 소스가 {d}프레임({d/NTSC_FPS:.2f}초) 부족 "
+            print(f"      [클램프] 이벤트 {ev:03d} {rl}: 소스가 {d}프레임({d/FPS:.2f}초) 부족 "
                   f"→ 그 클립만 내용이 그만큼 밀림 (컷 지점·길이는 동일)")
     print("\n프리미어:")
     print("  1) 각 .edl 을 가져오기 → 오프라인 릴에 파일 연결")

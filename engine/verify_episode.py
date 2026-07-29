@@ -14,8 +14,12 @@ import sys, os, re, wave
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJ = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
+import make_edl
 from make_edl import df_to_frames, parse_keeps
+from silence_cut import probe_media
 
+# 소스 실제 fps 로 맞춘다. 상수 29.97 로 두면 59.94p 회차에서 오디오 길이와 EDL 소스
+# in/out 이 정확히 2배로 어긋나 '멀쩡한 산출물'을 FAIL 로 잡는다(실측).
 FPS = 30000 / 1001
 FAIL = []
 
@@ -42,10 +46,17 @@ def cues(p):
 def main():
     if len(sys.argv) < 2:
         print(__doc__); sys.exit(1)
-    base = os.path.splitext(os.path.basename(sys.argv[1]))[0]
+    master = sys.argv[1]
+    base = os.path.splitext(os.path.basename(master))[0]
     has_cam2 = "--cam2" in sys.argv
     o = os.path.join(PROJ, "output")
     P = lambda s: os.path.join(o, base + s)
+
+    global FPS
+    if os.path.exists(master):
+        FPS = probe_media(master)["fps"]
+        make_edl.FPS = FPS          # df_to_frames 가 같은 기준으로 EDL TC 를 읽도록
+        print(f"  (소스 {FPS}fps 기준으로 검증)")
 
     print("── 컷 / 타임라인")
     keeps = parse_keeps(P("_cut.xml"))

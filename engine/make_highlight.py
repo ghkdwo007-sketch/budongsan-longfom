@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-make_highlight.py — 컷 타임라인을 '카테고리별 레이어' + '하이라이트 축약본' 으로 나눈다.
+make_highlight.py — 컷 결과를 '카테고리를 붙인 단일 시퀀스' 로 정리한다.
 
-두 가지를 만든다.
+만드는 것(전부 시퀀스 하나짜리 EDL — 트랙에 쌓지 않는다):
 
-1) 카테고리 레이어 EDL — 카테고리마다 EDL 을 하나씩. 각 EDL 은 **원래 레코드 위치**를
-   그대로 유지하므로, 프리미어에서 트랙(V2, V3 …)에 하나씩 올리면 카테고리별로
-   층이 갈린다. 트랙별 전체 선택 → 라벨 색 지정으로 색 구분이 끝난다.
-   (CMX3600 EDL 에는 클립 라벨 색상 필드가 없고, 색을 담을 수 있는 FCP7 XML 은
-    Premiere 26 이 못 읽는다. 그래서 '색' 대신 '레이어'로 가른다.)
+  <base>_final.edl          keep=true 구간만 이어붙인 축약본  ← 보통 이걸 쓴다
+  <base>_full_labeled.edl   컷편집 전체(컷 개수 그대로)
+  <base>_highlight.srt      축약본 시간축에 맞춘 자막
+  <base>_highlight_audio.wav 축약본 길이에 맞춘 정리 오디오
+  <base>_categories.md      구간 판단 근거 + 조립 순서
 
-2) 하이라이트 EDL + 자막 — keep=true 인 구간만 이어붙인 축약 시퀀스.
+카테고리는 **클립 이름**으로 넣는다(`사례일화_037`). 프리미어가 * FROM CLIP NAME 을
+클립 이름으로 읽으므로 타임라인에서 바로 구분되고, 이름으로 묶어 선택해 레이블 색을
+줄 수도 있다.
+
+[하지 말 것] 카테고리마다 EDL 을 따로 뽑아 V2·V3… 에 쌓는 방식.
+처음에 그렇게 만들었다가 실패했다 — 카테고리 경계가 컷 중간을 잘라 104컷이 129조각이
+되고, 각 EDL 이 자기 구간만 갖고 나머지는 비어 있어 타임라인이 알아볼 수 없게 된다.
+그래서 컷은 쪼개지 않고, 각 컷을 '가장 많이 겹치는 카테고리'에 통째로 배정한다.
 
 전제: auto_cut.py 로 output/<base>_cut.xml · <base>_cut.srt 가 있어야 한다.
 
@@ -20,13 +27,14 @@ make_highlight.py — 컷 타임라인을 '카테고리별 레이어' + '하이�
 
 구간.json:
   {
-    "categories": {"오프닝": "Violet", "사례": "Mango", ...},
+    "categories": {"오프닝": "Violet", "사례·일화": "Mango", ...},   # 권장 레이블 색
     "segments": [
       {"start": "0:00", "end": "1:31", "cat": "오프닝", "keep": true, "note": "..."},
       ...
     ]
   }
   start/end 는 **컷 타임라인**(= _cut.srt 와 같은 기준) 의 M:SS 또는 초.
+  keep=false 는 축약본에서 빠진다(제작지시·잡담·중복).
 """
 import sys, os, re, json
 
@@ -139,16 +147,14 @@ def main():
     for s in segs:
         bycat.setdefault(s["cat"], []).extend(
             slice_timeline(keeps, parse_t(s["start"]), parse_t(s["end"]), fps))
-    print("\n── 카테고리 레이어")
+    # 카테고리별 EDL 을 따로 뽑아 트랙에 쌓는 방식은 쓰지 않는다 — 아래 3) 참고.
+    # 여기서는 분량 집계만 하고, 구분은 클립 이름으로 넣는다.
+    print("\n── 카테고리 분량")
     rows = []
     for i, (cat, evs) in enumerate(bycat.items(), 1):
         dur = sum(b - a for a, b, _ in evs) / fps
-        slug = f"cat{i:02d}"
-        fn = f"{base}_{slug}.edl"
-        open(os.path.join(o, fn), "w", encoding="utf-8", newline="\r\n").write(
-            build_edl(f"{base} {cat}", evs, "CAM01", note, renumber_record=False))
-        rows.append((i, cat, colors.get(cat, "-"), len(evs), dur, fn))
-        print(f"  V{i+1}  {cat:<14} {len(evs):3d}클립 {dur/60:5.2f}분  {fn}")
+        rows.append((i, cat, colors.get(cat, "-"), len(evs), dur))
+        print(f"  {cat:<14} {dur/60:5.2f}분")
 
     # ── 2) 하이라이트 (keep=true 만 이어붙임) ──────────────────────
     hl, cuts = [], []
@@ -203,7 +209,59 @@ def main():
         if d > 50:
             print("  [주의] 영상/오디오 길이 차가 큽니다 — 확인 필요")
 
-    # ── 3) 카테고리 표 ────────────────────────────────────────────
+    # ── 3) 단일 시퀀스 EDL — 카테고리를 '클립 이름'으로 ──────────────
+    # 카테고리별 EDL 을 트랙에 쌓는 방식은 실패했다. 카테고리 경계가 컷 중간을 잘라
+    # 클립이 산산조각 나고, 각 EDL 이 자기 구간만 갖고 나머지는 비어 있어 조립이 안 된다.
+    # 대신 시퀀스 하나에 다 담고, 컷은 쪼개지 않은 채(원래 104개 그대로) 각 컷을
+    # '가장 많이 겹치는 카테고리'에 배정해 * FROM CLIP NAME 으로 적는다.
+    # 프리미어가 이 값을 클립 이름으로 읽으므로 타임라인에서 바로 구분된다.
+    def clean(s):
+        return re.sub(r"[·:/]", "", s).strip()
+
+    spans = []                                  # (레코드in, 레코드out, 카테고리)
+    for s in segs:
+        spans.append((int(round(parse_t(s["start"]) * fps)),
+                      int(round(parse_t(s["end"]) * fps)), s["cat"], s.get("keep", True)))
+
+    def dominant(r0, r1):
+        best, bw, bk = "미분류", 0, True
+        for s0, s1, cat, kp in spans:
+            w = min(r1, s1) - max(r0, s0)
+            if w > bw:
+                best, bw, bk = cat, w, kp
+        return best, bk
+
+    def labeled(events, renumber, fname, title):
+        fcm = "DROP FRAME" if tc_rate()[1] else "NON-DROP FRAME"
+        out, rec, tally = [f"TITLE: {title}", f"FCM: {fcm}", ""], 0, {}
+        for i, (si, so, ri) in enumerate(events, 1):
+            dur = so - si
+            r_in = rec if renumber else ri
+            r_out = r_in + dur
+            rec = r_out
+            cat, _ = dominant(ri, ri + dur)
+            tally[cat] = tally.get(cat, 0) + dur
+            out.append(f"{i:03d}  {reel('CAM01')} V     C        "
+                       f"{frames_to_df(si)} {frames_to_df(so)} "
+                       f"{frames_to_df(r_in)} {frames_to_df(r_out)}")
+            out.append(f"* FROM CLIP NAME: {clean(cat)}_{i:03d}")
+            out.append("")
+        open(os.path.join(o, fname), "w", encoding="utf-8",
+             newline="\r\n").write("\n".join(out) + "\n")
+        return tally
+
+    print("\n── 단일 시퀀스 (카테고리 = 클립 이름)")
+    full_ev, acc = [], 0
+    for a, b in keeps:
+        full_ev.append((a, b, acc)); acc += b - a
+    t1 = labeled(full_ev, True, base + "_full_labeled.edl", f"{base} FULL")
+    print(f"  본편   {len(full_ev):3d}클립 {acc/fps/60:5.2f}분  {base}_full_labeled.edl")
+    t2 = labeled(hl, True, base + "_final.edl", f"{base} FINAL")
+    print(f"  하이라이트 {len(hl):3d}클립 {hl_f/fps/60:5.2f}분  {base}_final.edl  ← 이걸 쓰면 됨")
+    for cat, f_ in sorted(t2.items(), key=lambda x: -x[1]):
+        print(f"      {clean(cat):<12} {f_/fps/60:5.2f}분")
+
+    # ── 4) 카테고리 표 ────────────────────────────────────────────
     md = [f"# {base} — 카테고리 / 하이라이트", "",
           f"본편 {total_f/fps/60:.2f}분 · 하이라이트 {hl_f/fps/60:.2f}분", "",
           "## 0) 먼저 — TC0 사본",
@@ -216,24 +274,28 @@ def main():
           "       -timecode 00:00:00:00 원본_TC0.MP4",
           "```",
           "",
-          "## 1) 본편 시퀀스 (카테고리 색 구분)",
+          "## 1) 시퀀스는 하나면 된다",
           "",
-          "1. `_cam01_v_tc0.edl` 가져오기 → 시퀀스가 생긴다. 오프라인 릴 **CAM01** 을",
-          "   `_TC0.MP4` 에 연결. 이게 본편(V1)이다.",
-          "2. `_cut_audio_flat.wav` 를 **A1 의 00:00:00:00** 에 올린다.",
-          "   V1 클립의 원본 오디오는 음소거 — EDL 에는 오디오가 없고 이 WAV 가 정리본이다.",
-          "3. `_cut.srt` 가져오기 → 캡션 트랙.",
-          "4. 아래 카테고리 EDL 을 각각 가져온다(EDL 하나 = 시퀀스 하나).",
-          "   각 시퀀스를 열어 **전체 선택 → 복사** → 본편 시퀀스의 해당 트랙에",
-          "   **00:00:00:00 기준으로 붙여넣기**. 레코드 위치가 본편과 같으므로 그대로 겹친다.",
-          "5. 트랙별로 클립 전체 선택 → 오른쪽 클릭 > 레이블 > 아래 색.",
-          "6. 색 확인이 끝나면 V2 이상은 숨기거나 지운다 — **실제 편집본은 V1** 이다.",
-          "7. 타임라인 전체 선택 → `Cmd/Ctrl+Shift+D` (컷 클릭음 제거).",
+          f"**`{base}_final.edl`** 하나만 가져오면 된다(15분 하이라이트).",
+          f"본편 전체가 필요하면 `{base}_full_labeled.edl`(21분).",
           "",
-          "| 트랙 | 카테고리 | 레이블 색 | 클립 | 길이 | EDL |",
-          "|---|---|---|---|---|---|"]
-    for i, cat, col, n, dur, f_ in rows:
-        md.append(f"| V{i+1} | {cat} | {col} | {n} | {dur/60:.2f}분 | `{f_}` |")
+          "카테고리별로 EDL 을 나눠 트랙에 쌓는 방식은 쓰지 않는다 — 카테고리 경계가",
+          "컷 중간을 잘라 클립이 산산조각 나고, 각 EDL 이 자기 구간만 갖고 나머지는",
+          "비어 있어 조립이 안 된다. 대신 **컷을 쪼개지 않고** 각 클립에 카테고리를",
+          "이름으로 붙였다(`001 사례일화` 형식). 타임라인에서 클립 이름으로 바로 구분된다.",
+          "",
+          "1. EDL 가져오기 → 오프라인 릴 **CAM01** 을 `_TC0.MP4` 에 연결.",
+          f"2. `{base}_highlight_audio.wav` 를 **A1 의 00:00:00:00** 에.",
+          "   (본편을 쓸 거면 `_cut_audio_flat.wav`) V1 클립의 원본 오디오는 음소거.",
+          f"3. `{base}_highlight.srt` 가져오기. (본편은 `_cut.srt`)",
+          "4. 전체 선택 → `Cmd/Ctrl+Shift+D` (컷 클릭음 제거).",
+          "5. 색으로 보고 싶으면 — 타임라인에서 같은 이름 클립을 선택",
+          "   (오른쪽 클릭 > 레이블). 이름이 이미 카테고리라 고르기 쉽다.",
+          "",
+          "| 카테고리 | 권장 레이블 색 | 길이 |",
+          "|---|---|---|"]
+    for i, cat, col, n, dur in rows:
+        md.append(f"| {cat} | {col} | {dur/60:.2f}분 |")
     md += ["", "## 2) 하이라이트 시퀀스 (별도)", "",
            f"본편과 **다른 시퀀스**로 만든다. 길이 {hl_f/fps/60:.2f}분.", "",
            f"1. `{base}_highlight.edl` 가져오기 → 릴 **CAM01** 을 `_TC0.MP4` 에 연결.",

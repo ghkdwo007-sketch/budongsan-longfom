@@ -38,11 +38,19 @@ pip install nvidia-cublas-cu12 "nvidia-cudnn-cu12>=9,<10"
 ```
 
 **macOS (Apple Silicon)**
+
+macOS 기본 `python3` 는 3.9(Command Line Tools)라 엔진이 안 돕니다. 3.12를 따로 깔고
+**프로젝트 폴더에 venv** 를 만듭니다 — 이후 `edit.sh`·`batch.sh` 는 이 venv를 자동으로 찾습니다.
+
 ```bash
-brew install ffmpeg
-pip install -r requirements.txt
+brew install ffmpeg python@3.12
+/opt/homebrew/bin/python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python setup_check.py --install
 ```
+
 mlx-whisper가 자동 선택됩니다. 엔진이 OS에 맞는 전사 백엔드를 알아서 고릅니다.
+`python engine/...` 로 직접 돌릴 때는 `.venv/bin/python engine/...` 로 부르세요.
 
 `setup_check.py` 가 "준비 완료" 를 찍으면 끝입니다.
 

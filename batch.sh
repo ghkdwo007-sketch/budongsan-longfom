@@ -11,7 +11,10 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="$1"
 PRESET="${2:-표준}"
-PY="$(command -v python3 || command -v python)"   # Windows(Git Bash)에는 python3 가 없음
+# 프로젝트 venv 를 최우선 (macOS 기본 python3 는 3.9라 엔진이 못 돈다)
+PY="$DIR/.venv/bin/python"
+[ -x "$PY" ] || PY="$DIR/.venv/Scripts/python.exe"          # Windows venv
+[ -x "$PY" ] || PY="$(command -v python3 || command -v python)"   # Windows(Git Bash)에는 python3 가 없음
 
 if [ -z "$SRC" ] || [ ! -d "$SRC" ]; then
   echo "사용법: ./batch.sh \"영상폴더\" [보수|표준|공격]"

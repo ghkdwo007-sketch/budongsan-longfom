@@ -8,5 +8,11 @@ faster-whisper; platform_system != "Darwin"
 # numpy 는 mlx-whisper 설치 시 함께 들어옵니다 (어/음 음향검출에 사용)
 numpy
 
+# scipy — 2캠 싱크 오프셋 측정 (engine/sync_2cam.py 의 상관관계 계산). 2캠 회차에 필수
+scipy
+
+# pillow — 쇼츠 자막 이미지 렌더링 (engine/shorts_premiere.py)
+pillow
+
 # 시스템 도구 (pip 아님):
 #   - ffmpeg : brew install ffmpeg   (ffprobe 포함)

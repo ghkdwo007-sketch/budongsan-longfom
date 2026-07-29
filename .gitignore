@@ -17,6 +17,9 @@ output/
 *.mp3
 *.aac
 
+# 파이썬 가상환경 (PC마다 새로 만든다 — setup_check.py 참고)
+.venv/
+
 # 파이썬 캐시
 __pycache__/
 *.pyc
@@ -29,3 +32,5 @@ __pycache__/
 
 # macOS
 .DS_Store
+# exFAT/USB 드라이브에서 macOS 가 만드는 리소스 포크 사이드카
+._*

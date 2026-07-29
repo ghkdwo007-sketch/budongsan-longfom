@@ -134,6 +134,28 @@ PRESETS = {
 }
 
 
+def _find_profile_dir(project_dir, profile):
+    """한글 폴더명은 맥(NFD)과 윈도우(NFC)에서 바이트가 달라 그냥 join 하면 못 찾는다.
+
+    맥에서 만든 '부동산롱폼' 은 자모가 분리돼(NFD) 저장되는데, 윈도우는 바이트로만
+    비교하므로 NFC 로 입력한 --profile 이 매칭되지 않는다. 정확히 일치하는 게 없으면
+    유니코드 정규화를 맞춰 다시 찾는다. (외장 SSD 로 두 OS 를 오갈 때 실제로 겪은 문제)
+    """
+    root = os.path.join(project_dir, "profiles")
+    exact = os.path.join(root, profile)
+    if os.path.isdir(exact):
+        return exact
+    import unicodedata
+    want = unicodedata.normalize("NFC", profile)
+    try:
+        for name in os.listdir(root):
+            if unicodedata.normalize("NFC", name) == want:
+                return os.path.join(root, name)
+    except OSError:
+        pass
+    return exact          # 없으면 원래 경로로 — 아래에서 '프로파일 없음' 안내
+
+
 def load(preset="표준", project_dir=None, profile=None):
     """우선순위: DEFAULTS < 프리셋 < 프로파일 < config.json"""
     cfg = dict(DEFAULTS)
@@ -142,7 +164,7 @@ def load(preset="표준", project_dir=None, profile=None):
 
     # 프로그램(코너)별 프로파일 — profiles/<이름>/config.json
     if profile and project_dir:
-        p = os.path.join(project_dir, "profiles", profile, "config.json")
+        p = os.path.join(_find_profile_dir(project_dir, profile), "config.json")
         if os.path.exists(p):
             try:
                 pc = json.load(open(p, encoding="utf-8"))

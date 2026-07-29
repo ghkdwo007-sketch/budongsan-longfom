@@ -130,6 +130,27 @@ def check_model(install):
              "device='cpu',compute_type='int8')"])
 
 
+def check_git_unicode(install):
+    """맥에서 한글 폴더명이 NFD 로 커밋되는 걸 막는다.
+
+    맥은 '부동산롱폼' 을 자모 분해(NFD)해 저장하고 윈도우는 NFC 로 쓴다. 이 설정이 없으면
+    같은 프로파일 폴더가 두 벌로 중복 커밋된다(실제로 겪음). git init 이 윈도우에서 됐다면
+    이 값이 안 잡혀 있다.
+    """
+    if not IS_MAC or not os.path.isdir(os.path.join(HERE, ".git")):
+        return
+    ok, out = run(["git", "-C", HERE, "config", "--get", "core.precomposeunicode"], quiet=True)
+    if ok and out.strip() == "true":
+        say(OK, "git 한글 파일명", "precomposeunicode=true")
+        return
+    say(BAD, "git 한글 파일명", "precomposeunicode 미설정 — 프로파일이 NFC/NFD 두 벌로 커밋됨")
+    if install:
+        print("    → git config core.precomposeunicode true")
+        run(["git", "-C", HERE, "config", "core.precomposeunicode", "true"])
+    else:
+        actions.append("git config core.precomposeunicode true")
+
+
 def check_profile():
     sys.path.insert(0, os.path.join(HERE, "engine"))
     try:
@@ -153,7 +174,7 @@ def main():
     print("── 런타임");      check_python(); check_ffmpeg(a.install)
     print("\n── 파이썬 패키지"); check_packages(a.install)
     print("\n── 전사");        check_gpu(a.install); check_model(a.install)
-    print("\n── 프로젝트");    check_profile()
+    print("\n── 프로젝트");    check_git_unicode(a.install); check_profile()
 
     print("\n" + "─" * 60)
     if problems:

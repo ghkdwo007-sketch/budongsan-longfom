@@ -11,9 +11,10 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="$1"
 PRESET="${2:-표준}"
-# 프로젝트 venv 를 최우선 (macOS 기본 python3 는 3.9라 엔진이 못 돈다)
-PY="$DIR/.venv/bin/python"
-[ -x "$PY" ] || PY="$DIR/.venv/Scripts/python.exe"          # Windows venv
+# venv 우선. 같은 SSD 를 맥/윈도우가 오가므로 OS 별로 따로 만든다
+# (macOS 기본 python3 는 3.9라 엔진이 못 돈다)
+PY="$DIR/.venv-mac/bin/python"
+[ -x "$PY" ] || PY="$DIR/.venv-win/Scripts/python.exe"
 [ -x "$PY" ] || PY="$(command -v python3 || command -v python)"   # Windows(Git Bash)에는 python3 가 없음
 
 if [ -z "$SRC" ] || [ ! -d "$SRC" ]; then

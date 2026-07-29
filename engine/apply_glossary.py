@@ -59,7 +59,9 @@ def main():
     if gloss is None:
         if not profile:
             print("--profile 또는 --glossary 가 필요합니다"); sys.exit(1)
-        gloss = os.path.join(PROJ, "profiles", profile, "glossary.txt")
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from config import _find_profile_dir          # 한글 폴더명 NFC/NFD 대응
+        gloss = os.path.join(_find_profile_dir(PROJ, profile), "glossary.txt")
     for p in (srt, gloss):
         if not os.path.exists(p):
             print("파일 없음:", p); sys.exit(2)

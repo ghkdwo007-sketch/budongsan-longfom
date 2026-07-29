@@ -17,7 +17,10 @@ output/
 *.mp3
 *.aac
 
-# 파이썬 가상환경 (PC마다 새로 만든다 — setup_check.py 참고)
+# 파이썬 가상환경 — OS별로 따로 둔다(.venv-mac / .venv-win).
+# SSD 를 오가도 각자 자기 것을 쓰므로 재설치가 필요 없다. 커밋은 하지 않는다.
+.venv-mac/
+.venv-win/
 .venv/
 
 # 파이썬 캐시

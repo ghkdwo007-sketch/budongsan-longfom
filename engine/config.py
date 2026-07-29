@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+config.py — 모든 편집 파라미터 + 공격성 프리셋 한 곳에서 관리.
+
+우선순위:  내장 기본값(표준)  <  프리셋(보수/표준/공격)  <  config.json(사용자)
+사용:
+  python3 auto_cut.py "영상.mp4" --preset 공격
+  또는 프로젝트 루트에 config.json 두면 자동 적용.
+"""
+
+import json, os
+
+# ── 표준(기본) 설정 — 사용자가 검증한 값 ──
+DEFAULTS = {
+    # 무음 — 비블 최종본 실측(2026-07, 96분 라이브 완성본)으로 캘리브레이션:
+    # 최종본의 문장 끝 쉼 중앙값 0.14s·p90 0.40s → 컷 지점 쉼(PAD_LEAD+PAD_TAIL)을 ~0.25s로.
+    # 어미 보존은 패딩 대신 NOISE_DB(-45)와 WORD_SNAP 가드가 담당한다.
+    "NOISE_DB": -45.0,       # 이보다 조용하면 무음. 작은 끝음(어미)이 안 잘리게 낮춤
+    "MIN_SILENCE": 0.45,     # 이 길이(초) 이상 조용해야 컷 (0.65→0.45, 최종본 쉼 실측 반영)
+    "PAD_LEAD": 0.15,        # 말이 끝난 뒤 남기는 여유(초) (0.30→0.15)
+    "PAD_TAIL": 0.10,        # 다음 말이 시작되기 전 여유(초) (0.20→0.10)
+    "MIN_KEEP": 0.35,        # 이보다 짧은 토막은 버림 — 잘게 쪼개 튀는 소리 방지
+    # 단어 경계 스냅 가드 — 컷 경계가 전사된 단어를 관통하면 단어 경계까지 keep을 확장.
+    # (완성본 대비 과제거 62곳이 전부 '경계에서 단어 머리/꼬리 잘림'이었음 → 구조적으로 차단)
+    "WORD_SNAP": True,
+    "WORD_SNAP_PAD": 0.05,   # 스냅 시 단어 밖 여유(초)
+
+    # 음량
+    "TARGET_LUFS": -14.0,
+    "TARGET_PEAK_DB": -6.0,
+
+    # 오디오 후처리 (전문 편집자 기본 = 음성보정 ON)
+    "DENOISE": False,         # afftdn 강제 노이즈 제거(항상). 보통은 AUTO_DENOISE로 충분
+    "AUTO_DENOISE": True,     # 무음(노이즈플로어) 측정 → 시끄러우면 자동 노이즈 제거
+    "NOISE_FLOOR_DB": -50.0,  # 무음 구간 평균이 이보다 크면(=시끄러우면) 노이즈 제거 적용
+    "DEESS": True,            # deesser 치찰음(ㅅ,ㅊ) 완화 — 안전하고 프로 기본
+    "DENOISE_STRENGTH": 10,   # afftdn nr(dB). 낮을수록 은은(아티팩트 최소)
+    # 음성 톤: natural(투명하게 정리) / podcast(따뜻·프레즌스·강한 압축으로 일정하게)
+    "AUDIO_STYLE": "natural",
+
+    # 추임새 — 기본 OFF. 아/어/음/뭐 등을 자르면 말맛이 사라져 부자연스러움(비블 피드백).
+    # 추임새까지 타이트하게 빼려면 '공격' 프리셋을 쓴다.
+    "REMOVE_FILLERS": False,
+    "FILLER_SOUND_CHARS": "아어엄음으에",
+    "FILLER_PHRASES": ["그러니까", "그니까", "그러니깐", "그니깐", "그까",
+                       "뭐", "뭔가", "막", "약간", "좀"],
+    "FILLER_PAD": 0.03,
+
+    # 망설임 빈틈(어/음) — 기본 OFF(추임새와 함께 살림)
+    "REMOVE_HESITATION": False,
+    "HESITATION_MIN": 0.55,  # 짧은 어/음 꼬리(작은 어미 포함)는 보존, 긴 망설임만 컷
+    "HESITATION_PAD": 0.06,
+
+    # 숨소리 축소 — 단어 사이 '들숨/날숨'(노이즈성·말소리보다 작음)을 무음처럼 줄인다.
+    # 유성음(어/음)은 스펙트럼 평탄도가 낮아 제외 → 추임새는 안 건드림.
+    "BREATH_REDUCE": True,
+    "BREATH_MIN_DUR": 0.15,   # 이 길이(초) 이상 단어 간격만 검사
+    "BREATH_REL_LO": -40.0,   # 말소리 기준 이만큼 아래~
+    "BREATH_REL_HI": -12.0,   # ~이만큼 아래(말소리보다 작은 음량대)
+    "BREATH_FLATNESS": 0.35,  # 스펙트럼 평탄도(노이즈성) 임계 — 높을수록 보수적
+    "BREATH_FRAC": 0.40,      # 간격에서 숨소리 프레임 비율이 이 이상이면 줄임
+    "BREATH_KEEP": 0.12,      # 줄인 뒤 남길 자연스러운 쉼(초)
+    "BREATH_PAD": 0.04,       # 앞뒤 여유(초)
+
+    # 어/음 음향 검출 — voiced 지속음을 잘라 작은 어미까지 날리고 미세컷을 늘려 choppy 유발.
+    # 표준/보수는 기본 OFF(자연스러움). 더 타이트하게 어/음까지 빼려면 공격 프리셋.
+    "ACOUSTIC_FILLER": False,
+    "ACOUSTIC_MIN_DUR": 0.28,   # 음향 어/음 최소 길이(초). 짧은 미세컷이 튀는 소리 유발 → 0.28로 절제
+    # 어/음 뒤 이 시간(초) 안에 말이 이어지면 컷(=말 중간 어/음), 한참 침묵이면 보존(=문장 끝 꼬리)
+    "ACOUSTIC_FOLLOW_MAX": 1.0,
+
+    # 말더듬·중복
+    "REMOVE_REPEATS": True,
+    "REPEAT_GAP": 0.8,
+    "FUZZY_REPEAT": True,    # 똑같은 말뿐 아니라 '비슷한 말 다시하기'(false-start)도 검출
+    "FUZZY_RATIO": 0.7,      # 두 구절 유사도가 이 이상이면 앞 시도 제거
+
+    # NG(엔지)·재촬영 컷 — 명시적 재촬영 신호("다시 할게요/컷/스톱") 뒤에 같은 말을
+    # 다시 하면(=진짜 NG), 앞 실패 테이크 + 신호어를 통째로 제거. 재시도가 없으면 안 건드림(안전).
+    "REMOVE_NG": True,
+    "NG_MARKERS": ["다시할게", "다시할게요", "다시갈게", "다시갈게요", "다시하겠습니다",
+                   "다시가겠습니다", "다시요", "잠깐스톱", "스톱", "엔지", "아니다시",
+                   "컷다시", "다시한번할게", "잘못말했", "말이헛나왔"],
+
+    # 문맥 기반 필러 — '좀'이 '조금'의 뜻(좀 더/좀 많이)이면 살림(과제거 방지)
+    "CONTEXT_FILLER": True,
+
+    # 받아쓰기
+    "STT_MODEL": "mlx-community/whisper-large-v3-turbo",
+    "VERBATIM_PROMPT": "음... 어... 그러니까, 아 그게, 좀, 뭐, 약간, 막, 그래서, 어어, 음음, 이제, 뭔가. 네, 자.",
+
+    # 컷 다듬기 — 클릭/팝 제거는 프리미어 Cmd+Shift+D(기본 오디오 전환)로.
+    # XML 페이드(키프레임)는 프리미어가 잘못 읽어 오디오를 음소거하는 버그가 있어 기본 끔.
+    "AUDIO_FADE_FRAMES": 0,  # 0=끔(권장). 컷 클릭은 Cmd+Shift+D로 제거.
+
+    # 안전망
+    "MAKE_REJECTED": False,  # 잘려나간 구간만 모은 '버린 컷' 시퀀스 생성 여부 (기본 끔)
+    "BACKUP_OUTPUTS": True,  # 덮어쓰기 전 이전 결과(xml/srt/report/words)를 _backup/에 보관
+    "HTML_REPORT": True,     # 비블 다크 톤 시각 리포트(클릭 타임코드) HTML 생성
+    "POLISH_SUBTITLES": True, # 자막을 한 줄 30자로 마감 + .vtt/.ass(비블 스타일) 까지 한 번에 생성
+    "SUBTITLE_FILL_GAPS": True, # 자막 사이 빈칸 제거 — 각 자막 끝을 다음 자막 시작까지 연장(연속 표시)
+
+    # 자연스러움 가드 — 컷이 너무 촘촘하면 부자연스러움. 그런 구간을 찾아 경고.
+    "CHOPPY_WINDOW": 8.0,    # 이 길이(초) 창 안에
+    "CHOPPY_MAX": 6,         # 컷이 이 개수 이상이면 'choppy(부자연)' 주의 (실측: 중앙3/최대7 → 상위 1~2%만 잡음)
+}
+
+# ── 프리셋: 표준 대비 바뀌는 값만 ──
+PRESETS = {
+    "보수": {   # 가장 덜 자름 — 자연스러움/어미 보존 최우선
+        "MIN_SILENCE": 0.8,
+        "PAD_LEAD": 0.35,
+        "PAD_TAIL": 0.22,
+        "HESITATION_MIN": 0.7,
+        "REPEAT_GAP": 0.4,
+        "ACOUSTIC_FILLER": False,
+        "FILLER_PHRASES": ["그러니까", "그니까", "그러니깐", "그니깐"],
+    },
+    "표준": {},  # DEFAULTS 그대로
+    "공격": {   # 최대한 타이트 — 추임새/망설임까지 제거(말맛보다 군더더기 제거 우선)
+        "MIN_SILENCE": 0.4,
+        "PAD_LEAD": 0.08,
+        "PAD_TAIL": 0.12,
+        "REMOVE_FILLERS": True,
+        "REMOVE_HESITATION": True,
+        "HESITATION_MIN": 0.28,
+        "REPEAT_GAP": 1.0,
+        "ACOUSTIC_FILLER": True,
+        "FILLER_PHRASES": ["그러니까", "그니까", "그러니깐", "그니깐", "그까",
+                           "뭐", "뭔가", "막", "약간", "좀",
+                           "그래서", "이제", "그냥", "근데"],
+    },
+}
+
+
+def load(preset="표준", project_dir=None, profile=None):
+    """우선순위: DEFAULTS < 프리셋 < 프로파일 < config.json"""
+    cfg = dict(DEFAULTS)
+    cfg.update(PRESETS.get(preset, {}))
+    cfg["_preset"] = preset if preset in PRESETS else "표준"
+
+    # 프로그램(코너)별 프로파일 — profiles/<이름>/config.json
+    if profile and project_dir:
+        p = os.path.join(project_dir, "profiles", profile, "config.json")
+        if os.path.exists(p):
+            try:
+                pc = json.load(open(p, encoding="utf-8"))
+                cfg.update({k: v for k, v in pc.items() if not k.startswith("_")})
+                cfg["_profile"] = profile
+            except Exception as e:
+                print(f"   [주의] 프로파일 읽기 실패({e}) — 무시")
+        else:
+            print(f"   [주의] 프로파일 없음: {p}")
+
+    # config.json 사용자 override
+    if project_dir:
+        p = os.path.join(project_dir, "config.json")
+        if os.path.exists(p):
+            try:
+                user = json.load(open(p, encoding="utf-8"))
+                user = {k: v for k, v in user.items() if not k.startswith("_")}
+                cfg.update(user)
+                cfg["_config_json"] = True
+            except Exception as e:
+                print(f"   [주의] config.json 읽기 실패({e}) — 무시")
+    return cfg

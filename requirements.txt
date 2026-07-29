@@ -1,0 +1,12 @@
+# 음성인식 (로컬). 설치: pip install -r requirements.txt
+#   macOS(애플 실리콘) → mlx-whisper
+#   Windows/Linux      → faster-whisper (CUDA 있으면 GPU, 없으면 CPU)
+# 엔진이 설치된 쪽을 자동으로 골라 씁니다.
+mlx-whisper; platform_system == "Darwin"
+faster-whisper; platform_system != "Darwin"
+
+# numpy 는 mlx-whisper 설치 시 함께 들어옵니다 (어/음 음향검출에 사용)
+numpy
+
+# 시스템 도구 (pip 아님):
+#   - ffmpeg : brew install ffmpeg   (ffprobe 포함)

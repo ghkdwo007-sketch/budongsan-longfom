@@ -135,11 +135,14 @@ PRESETS = {
 
 
 def _find_profile_dir(project_dir, profile):
-    """한글 폴더명은 맥(NFD)과 윈도우(NFC)에서 바이트가 달라 그냥 join 하면 못 찾는다.
+    """--profile 이름으로 profiles/<폴더> 를 찾는다. 한글 이름은 폴더명이 아니라 별칭이다.
 
-    맥에서 만든 '부동산롱폼' 은 자모가 분리돼(NFD) 저장되는데, 윈도우는 바이트로만
-    비교하므로 NFC 로 입력한 --profile 이 매칭되지 않는다. 정확히 일치하는 게 없으면
-    유니코드 정규화를 맞춰 다시 찾는다. (외장 SSD 로 두 OS 를 오갈 때 실제로 겪은 문제)
+    폴더는 ASCII(budongsan-longfom)로 두고, 한글 이름(부동산롱폼)은 config.json 의
+    "_프로파일" 값으로 맞춘다. 한글 폴더명은 맥이 자모 분해(NFD)해 저장하고 윈도우는
+    합친 형태(NFC)로 써서 바이트가 달라진다 — 외장 SSD 로 두 OS 를 오가면 같은 폴더가
+    양쪽에서 다른 것으로 보여 git 이 중복 커밋을 만든다(실제로 겪음).
+
+    ① 폴더명 그대로 → ② 정규화 맞춘 폴더명 → ③ config.json 의 "_프로파일" 별칭
     """
     root = os.path.join(project_dir, "profiles")
     exact = os.path.join(root, profile)
@@ -148,11 +151,23 @@ def _find_profile_dir(project_dir, profile):
     import unicodedata
     want = unicodedata.normalize("NFC", profile)
     try:
-        for name in os.listdir(root):
-            if unicodedata.normalize("NFC", name) == want:
-                return os.path.join(root, name)
+        names = os.listdir(root)
     except OSError:
-        pass
+        return exact
+
+    for name in names:                                    # ② 예전 한글 폴더 호환
+        if unicodedata.normalize("NFC", name) == want:
+            return os.path.join(root, name)
+
+    for name in names:                                    # ③ 한글 별칭
+        try:
+            with open(os.path.join(root, name, "config.json"), encoding="utf-8") as f:
+                label = json.load(f).get("_프로파일", "")
+        except Exception:
+            continue
+        if label and unicodedata.normalize("NFC", label) == want:
+            return os.path.join(root, name)
+
     return exact          # 없으면 원래 경로로 — 아래에서 '프로파일 없음' 안내
 
 

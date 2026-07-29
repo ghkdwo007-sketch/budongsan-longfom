@@ -7,9 +7,14 @@
 **트리거:** 비블 영상 편집 전반(기획~자막~쇼츠) 요청 시 `video-edit-pipeline` 스킬을 사용하라. 단일 작업은 전문 스킬 직접 호출 가능 — 컷편집만=`cut-editing`, 자막만=`subtitle-editing`, 리서치만=`content-research`, 기획만=`video-planning`, 검수만=`edit-direction`, 쇼츠만=`shorts-production`. 단순 질문은 직접 응답.
 
 **프로그램 프로파일:** `profiles/<이름>/` — 코너별 설정·용어집·워크플로를 모아둔다.
-현재 **`부동산롱폼`** (대표님&미빅님 Q&A 등, 2캠 교차편집). 회차 작업은 `profiles/부동산롱폼/README.md`
+현재 **`부동산롱폼`** (대표님&미빅님 Q&A 등, 2캠 교차편집). 회차 작업은 `profiles/budongsan-longfom/README.md`
 순서를 그대로 따르고, 새로 알게 된 건 그 문서와 `glossary.txt` 에 계속 쌓는다.
 실행: `python engine/auto_cut.py "영상.mp4" --preset 표준 --profile 부동산롱폼`
+
+**폴더는 ASCII, 이름은 한글.** 폴더명이 `budongsan-longfom` 인데 `--profile 부동산롱폼` 으로
+부르는 건 오타가 아니다 — `config.json` 의 `"_프로파일"` 값을 별칭으로 찾는다(`config._find_profile_dir`).
+맥은 한글 폴더명을 NFD 로, 윈도우는 NFC 로 저장해서 외장 SSD 를 오가면 같은 폴더가 두 벌로
+중복 커밋된다. **새 프로파일도 폴더는 ASCII 로 만들 것.**
 
 **핵심 엔진:** `engine/auto_cut.py` (= `./edit.sh "영상.mp4" --preset 보수|표준|공격`). 무음·추임새·말더듬 제거 + -14 LUFS 음량정리 + 컷정렬 자막을 한 번에 생성. 설정은 `engine/config.py`(프리셋) + `config.json`(사용자 override). 개선 계획은 `ROADMAP.md`.
 
@@ -29,7 +34,7 @@
 | 2026-07-29 | **EDL 내보내기 추가** (`make_edl.py`, CMX3600 · 29.97 DF · 자정넘김 대응 TC0 변형) | engine | **Premiere Pro 26.3에서 FCP7 XML 임포터 제거됨** — 설치 폴더에 xmeml 모듈 없음, 가져오기 형식 목록에도 없음. EDL/AAF만 남아 XML 경로 전면 대체 |
 | 2026-07-29 | 컷 적용 단일 오디오(`make_cut_audio.py`, 샘플 단위 절단) + 멀티캠 컷 clamp | engine | 오디오를 EDL 이벤트로 쪼개면 프리미어가 소스 in점을 무시하고 매 컷 0부터 재생 / 컷을 빼면 캠별 컷 구조가 달라져 교차편집 불가 |
 | 2026-07-29 | 자막 한 줄 25자 + 균형 분할(`_balanced_chunks`, 한국어 어미 사전 재사용) | subtitle_polish | 비블 자막이 '한 줄 + 검은 박스'라 38자는 화면 폭 초과. 그리디 분할은 '25자+7자' 토막 양산 |
-| 2026-07-29 | **프로파일 체계 도입** — `profiles/부동산롱폼/`(config·glossary·README) + `--profile` 옵션 + `apply_glossary.py` | config, auto_cut, engine | 코너별 설정·고유명사 교정·워크플로를 회차마다 재사용하고 계속 축적하기 위해 |
+| 2026-07-29 | **프로파일 체계 도입** — `profiles/budongsan-longfom/`(config·glossary·README) + `--profile` 옵션 + `apply_glossary.py` | config, auto_cut, engine | 코너별 설정·고유명사 교정·워크플로를 회차마다 재사용하고 계속 축적하기 위해 |
 | 2026-07-29 | **자막 싱크 드리프트 수정** — `regroup(max_chars=)` 로 처음부터 25자 생성 + `build_mapper(fps=)` 프레임 양자화 | make_subtitles, auto_cut | ① 사후 분할이 시간을 글자수 비례로 나눠 최대 850ms 오차 ② 영상은 프레임 반올림 누적인데 자막은 실수 누적이라 285컷에 평균 204ms 드리프트 |
 | 2026-07-29 | 자막 문장부호 정리 `SUB_STRIP_PUNCT` — 단독 온점·쉼표만 제거 | subtitle_polish, 프로파일 | 비블 자막 스타일. `? !` 와 `... …`, 숫자 안의 점/쉼표는 유지 |
 | 2026-07-29 | **회차 실행기 `run_episode.py` + 검증기 `verify_episode.py`** · EDL TC0 변형 항상 생성 | engine | 순서 자체가 학습 결과라 손으로 돌리면 틀린다(용어집→분할, TC0 선행). 검증기 항목은 전부 실제로 깨졌던 것들 |

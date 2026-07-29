@@ -44,9 +44,9 @@ macOS 기본 `python3` 는 3.9(Command Line Tools)라 엔진이 안 돕니다. 3
 
 ```bash
 brew install ffmpeg python@3.12
-/opt/homebrew/bin/python3.12 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python setup_check.py --install
+/opt/homebrew/bin/python3.12 -m venv .venv-mac
+.venv-mac/bin/python -m pip install -r requirements.txt
+.venv-mac/bin/python setup_check.py --install
 ```
 
 mlx-whisper가 자동 선택됩니다. 엔진이 OS에 맞는 전사 백엔드를 알아서 고릅니다.
@@ -63,14 +63,14 @@ python engine/run_episode.py \
   --profile 부동산롱폼
 ```
 
-자세한 순서와 각 단계의 이유는 [profiles/부동산롱폼/README.md](profiles/부동산롱폼/README.md) 에 있습니다.
+자세한 순서와 각 단계의 이유는 [profiles/budongsan-longfom/README.md](profiles/budongsan-longfom/README.md) 에 있습니다.
 Claude Code로 이 폴더를 열면 `CLAUDE.md` 를 읽고 워크플로를 파악합니다.
 
 ## 4) 회차별로 쌓이는 것
 
-- `profiles/부동산롱폼/glossary.txt` — 새 오인식이 나오면 여기에 추가.
+- `profiles/budongsan-longfom/glossary.txt` — 새 오인식이 나오면 여기에 추가.
   회차를 거듭할수록 자막 교정이 정확해집니다.
-- `profiles/부동산롱폼/README.md` 의 회차 기록 표.
+- `profiles/budongsan-longfom/README.md` 의 회차 기록 표.
 
 폴더째 외장 SSD에 두면 프로파일도 `output/` 도 같이 따라다니므로 축적이 그대로 유지됩니다.
 
@@ -87,12 +87,19 @@ Claude Code로 이 폴더를 열면 `CLAUDE.md` 를 읽고 워크플로를 파�
 컷 개수가 크게 바뀝니다(실측 210컷 ↔ 285컷). 캐시가 있으면 재전사를 건너뛰므로,
 SSD에 그대로 두는 한 어느 쪽에서 이어 작업해도 결과가 유지됩니다.
 
-**한글 폴더명은 두 OS가 다르게 저장합니다.** 맥은 자모를 분해해(NFD) `부동산롱폼` 을
-저장하고 윈도우는 합친 형태(NFC)로 씁니다. 바이트가 달라 그냥 비교하면 못 찾습니다.
-- 엔진은 `config._find_profile_dir` 이 두 형태를 모두 찾아주므로 `--profile 부동산롱폼` 은 그대로 됩니다.
-- git 은 `core.precomposeunicode=true` 로 NFC 통일 (이 저장소에 설정돼 있고 `.git` 이 SSD에
-  같이 있으므로 두 PC에 모두 적용됩니다). **이 설정이 없으면 프로파일 폴더가 NFC/NFD 두 벌로
-  중복 커밋됩니다.**
+**프로파일 폴더 이름은 ASCII 로 둡니다** — `profiles/budongsan-longfom/`.
+맥은 한글 폴더명을 자모 분해해(NFD) 저장하고 윈도우는 합친 형태(NFC)로 씁니다. 바이트가
+달라서, 한글 폴더명을 쓰면 **같은 폴더가 반대 OS 에서 "미추적 + 삭제됨" 으로 보이고
+`git add -A` 한 번에 두 벌로 중복 커밋됩니다** (실제로 겪음).
+
+명령은 한글 그대로 씁니다 — `--profile 부동산롱폼`. `config._find_profile_dir` 이
+각 프로파일 `config.json` 의 `"_프로파일"` 값을 별칭으로 읽어 폴더를 찾습니다.
+(예전 한글 폴더명과 NFD 입력도 계속 인식합니다)
+
+새 프로파일을 만들 때도 **폴더는 ASCII, 한글 이름은 `_프로파일` 에** 넣으세요.
+
+git 의 `core.precomposeunicode=true` 도 켜 둡니다(맥에서 `setup_check.py` 가 점검·설정).
+한글이 들어간 자막·영상 파일명에도 같은 문제가 생기기 때문입니다.
 
 **줄바꿈은 `.gitattributes` 로 LF 고정.** 작업 트리가 하나뿐이라 윈도우에서 CRLF로 받으면
 맥도 그 CRLF를 보게 되고, `.sh` 가 CRLF면 Git Bash가 바로 죽습니다.

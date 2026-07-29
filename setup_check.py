@@ -159,7 +159,7 @@ def check_profile():
         say(OK if c.get("_profile") else BAD, "부동산롱폼 프로파일",
             f"자막 {c.get('SUB_MAX_CHARS')}자 · 문장부호제거 {bool(c.get('SUB_STRIP_PUNCT'))}")
         if not c.get("_profile"):
-            problems.append("프로파일을 못 읽었습니다 — profiles/부동산롱폼/config.json 확인")
+            problems.append("프로파일을 못 읽었습니다 — profiles/budongsan-longfom/config.json 확인")
     except Exception as e:
         say(BAD, "프로파일 로딩", f"{type(e).__name__}: {e}")
         problems.append("엔진 임포트 실패")

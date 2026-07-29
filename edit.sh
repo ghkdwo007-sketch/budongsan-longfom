@@ -23,9 +23,13 @@ if [ ! -f "$VIDEO" ]; then
   exit 1
 fi
 
-# venv 우선. 같은 SSD 를 맥/윈도우가 오가므로 OS 별로 따로 만든다
+# venv 우선. 같은 SSD 를 맥/윈도우가 오가므로 OS 별로 따로 만든다.
+# OS 로 명시 분기한다 — 두 venv 가 한 디스크에 같이 있어서, 맥 바이너리(Mach-O 심볼릭 링크)를
+# 윈도우 Git Bash 의 `-x` 가 어떻게 판정하는지에 기대면 안 된다.
 # (macOS 기본 python3 는 3.9라 엔진이 못 돈다)
-PY="$DIR/.venv-mac/bin/python"
-[ -x "$PY" ] || PY="$DIR/.venv-win/Scripts/python.exe"
+case "$(uname -s)" in
+  Darwin) PY="$DIR/.venv-mac/bin/python" ;;
+  *)      PY="$DIR/.venv-win/Scripts/python.exe" ;;
+esac
 [ -x "$PY" ] || PY="$(command -v python3 || command -v python)"   # Windows(Git Bash)에는 python3 가 없음
 "$PY" "$DIR/engine/auto_cut.py" "$@"

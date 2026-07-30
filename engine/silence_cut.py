@@ -26,6 +26,9 @@ MIN_SILENCE   = 0.5     # 이 길이(초) 이상 조용해야 컷한다
 PAD_LEAD      = 0.10    # 말이 끝난 뒤 남기는 여유(초)
 PAD_TAIL      = 0.16    # 다음 말이 시작되기 전 남기는 여유(초) — 비대칭(tail↑)으로 끊김 완화
 MIN_KEEP      = 0.25    # 이보다 짧게 남는 토막(초)은 버린다
+MIN_REMOVE    = 0.0     # 패딩 적용 후 실제로 이만큼(초)도 못 지우는 무음은 컷하지 않는다
+                        # (0=끔) 패딩을 키우면 '지우는 건 거의 없는데 접합부만 생기는'
+                        # 미세컷이 늘어난다 — 그런 자리는 그냥 이어서 두는 게 자연스럽다
 
 TARGET_LUFS   = -14.0   # 유튜브 표준 라우드니스
 TARGET_PEAK_DB = -6.0   # 트루피크가 이 값을 넘지 않게 (둘 다 만족시키는 게인 선택)
@@ -40,7 +43,12 @@ if not os.path.exists(FFMPEG):
 
 
 def run(cmd):
-    return subprocess.run(cmd, capture_output=True, text=True)
+    # encoding 을 못 박아야 한다. 지정하지 않으면 로케일 기본값(한국어 윈도우 = cp949)으로
+    # 디코딩하는데, ffmpeg 는 경로를 UTF-8 로 찍는다. 소스 경로에 한글이 있으면
+    # 리더 스레드가 UnicodeDecodeError 로 죽고 stderr 가 None 이 되어,
+    # silencedetect 파싱이 'expected string, got NoneType' 로 터진다.
+    return subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
 
 
 def path_to_url(path):
@@ -201,10 +209,11 @@ def keep_ranges_from_silence(silences, total):
         # 비대칭: 말 시작 전(tail)은 넉넉히, 말 끝 뒤(lead)는 조금 — 끊김 소리 완화
         padded.append([max(0.0, a - PAD_TAIL), min(total, b + PAD_LEAD)])
 
-    # 겹치면 병합
+    # 겹치면 병합. MIN_REMOVE 만큼도 못 지우는 틈은 '컷하지 않고' 이어 붙인다 —
+    # 패딩(PAD_LEAD+PAD_TAIL)이 무음보다 길면 여기서 자동으로 흡수된다.
     merged = []
     for seg in padded:
-        if merged and seg[0] <= merged[-1][1]:
+        if merged and seg[0] <= merged[-1][1] + MIN_REMOVE:
             merged[-1][1] = max(merged[-1][1], seg[1])
         else:
             merged.append(seg)

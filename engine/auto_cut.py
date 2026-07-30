@@ -248,7 +248,8 @@ def measure_noise_floor(video, sil_keeps, total):
     p = subprocess.run(
         [SC.FFMPEG, "-hide_banner", "-ss", f"{s:.2f}", "-t", f"{min(e - s, 3.0):.2f}",
          "-i", video, "-map", "0:a:0", "-af", "volumedetect", "-f", "null", "-"],
-        capture_output=True, text=True)
+        # encoding 고정 — 한글 경로에서 cp949 디코딩 실패로 stderr 가 None 이 된다
+        capture_output=True, text=True, encoding="utf-8", errors="replace")
     m = re.search(r"mean_volume:\s*(-?[0-9.]+)", p.stderr or "")
     return float(m.group(1)) if m else None
 
@@ -372,6 +373,7 @@ def apply_config_to_modules():
     SC.PAD_LEAD = CFG["PAD_LEAD"]
     SC.PAD_TAIL = CFG["PAD_TAIL"]
     SC.MIN_KEEP = CFG["MIN_KEEP"]
+    SC.MIN_REMOVE = CFG.get("MIN_REMOVE", 0.0)
     SC.TARGET_LUFS = CFG["TARGET_LUFS"]
     SC.TARGET_PEAK_DB = CFG["TARGET_PEAK_DB"]
 
@@ -498,6 +500,9 @@ def main():
 
     # 내용 컷(에이전트/사용자 지정) — output/<base>_content_cuts.json 이 있으면 그 구간을 통째 제거
     # 형식: [[start초, end초, "이유(선택)"], ...]  (원본 타임라인 기준)
+    # 편집 의도가 명시된 구간이므로 무음 가드(cut_gate)의 '포기' 대상에서 빼둔다 —
+    # 자동 검출과 달리 여기서 조용한 자리를 못 찾았다고 지시를 무시하면 안 된다.
+    manual_removes = []
     cc_path = os.path.join(outdir, base + "_content_cuts.json")
     if os.path.exists(cc_path):
         try:
@@ -506,7 +511,7 @@ def main():
                 s, e = float(item[0]), float(item[1])
                 why = item[2] if len(item) > 2 else "(내용 컷)"
                 if e > s:
-                    removes.append([max(0.0, s), e])
+                    manual_removes.append([max(0.0, s), e])
                     report.setdefault("내용컷", []).append((s, e, why))
             print(f"   내용 컷 {len(ccs)}곳 반영 ({cc_path})")
         except Exception as ex:
@@ -560,6 +565,7 @@ def main():
         except Exception as ex:
             print(f"   [주의] 음향 검출 건너뜀: {ex}")
 
+    aud = asr = None          # 정리 오디오 샘플 — 숨소리 검출과 무음 가드가 같이 쓴다
     if CFG.get("BREATH_REDUCE") and clean_audio:
         try:
             import breath_reduce as BR
@@ -581,6 +587,39 @@ def main():
         except Exception as ex:
             print(f"   [주의] 숨소리 축소 건너뜀: {ex}")
 
+    # ── 무음 가드: 이어붙는 지점이 실제로 조용한지 오디오로 검증 ──
+    # 단어 기반 제거(더듬/중복·NG·망설임·숨소리)만 대상. whisper 단어 타임스탬프가
+    # ±100~200ms 흔들려서 '전사상 빈틈'이 실제로는 발화 중인 경우를 걸러낸다.
+    gate_dropped = []
+    if CFG.get("CUT_GATE", True) and removes:
+        try:
+            import cut_gate as CG
+            src = clean_audio or video
+            if aud is None:
+                import breath_reduce as BR
+                aud, asr = BR.load_audio(src)
+            floor = CG.estimate_floor(aud, asr, win=CFG.get("CUT_GATE_WIN", 0.04))
+            if floor is None:
+                print("   [주의] 무음 가드: 노이즈플로어 측정 실패 — 건너뜀")
+            else:
+                thr = floor + CFG.get("CUT_GATE_MARGIN", 8.0)
+                n_before = len(removes)
+                removes, gate_dropped, n_moved = CG.gate(
+                    removes, aud, asr, thr,
+                    win=CFG.get("CUT_GATE_WIN", 0.04),
+                    search=CFG.get("CUT_GATE_SEARCH", 0.20),
+                    total=info["duration"])
+                print(f"   무음 가드(기준 {thr:.0f}dB = 플로어 {floor:.0f}dB+"
+                      f"{CFG.get('CUT_GATE_MARGIN', 8.0):.0f}): "
+                      f"경계 이동 {n_moved}곳 · 제거 포기 {len(gate_dropped)}곳 "
+                      f"({n_before}→{len(removes)})")
+                if gate_dropped:
+                    report["가드보류"] = gate_dropped
+        except Exception as ex:
+            print(f"   [주의] 무음 가드 건너뜀: {ex}")
+
+    removes = removes + manual_removes      # 내용컷은 가드를 거치지 않는다
+
     if removes:
         keeps = subtract(sil_keeps, removes)
         kept_now = sum(b - a for a, b in keeps)
@@ -598,8 +637,8 @@ def main():
               f"→ 추가로 {fmt(kept_sil - kept_now)} 단축")
         rep_out = os.path.join(outdir, base + "_cut_report.txt")
         with open(rep_out, "w", encoding="utf-8") as f:
-            for cat in ("추임새", "망설임", "더듬/중복", "NG", "내용컷", "숨소리"):
-                if cat == "내용컷" and "내용컷" not in report:
+            for cat in ("추임새", "망설임", "더듬/중복", "NG", "내용컷", "숨소리", "가드보류"):
+                if cat not in report:      # 내용컷·가드보류는 해당 회차에만 생긴다
                     continue
                 f.write(f"━━━ {cat} ({len(report[cat])}개) ━━━\n")
                 for s, e, t in report[cat]:
@@ -612,6 +651,27 @@ def main():
                                   total=info["duration"])
         if n_snap:
             print(f"   단어 경계 보호: 컷 경계 {n_snap}곳을 단어 경계로 스냅")
+
+    # ── 무음 가드 마지막 패스: 실제 접합부를 검증 ──
+    # WORD_SNAP 이 경계를 단어 끝으로 되돌리고, 무음 컷 경계는 위 gate() 를 거치지
+    # 않으므로 여기서 한 번 더 본다. 조용한 자리를 못 찾으면 두 컷을 합쳐 안 끊는다.
+    if CFG.get("CUT_GATE", True) and aud is not None:
+        try:
+            import cut_gate as CG
+            floor = CG.estimate_floor(aud, asr, win=CFG.get("CUT_GATE_WIN", 0.04))
+            if floor is not None:
+                thr = floor + CFG.get("CUT_GATE_MARGIN", 8.0)
+                n0 = len(keeps)
+                keeps, n_merge, n_mv = CG.gate_keeps(
+                    keeps, aud, asr, thr,
+                    win=CFG.get("CUT_GATE_WIN", 0.04),
+                    search=CFG.get("CUT_GATE_SEARCH", 0.20),
+                    total=info["duration"], fps=info["fps"])
+                if n_merge or n_mv:
+                    print(f"   접합부 검증: 경계 이동 {n_mv}곳 · "
+                          f"컷 취소(합침) {n_merge}곳 ({n0}→{len(keeps)}컷)")
+        except Exception as ex:
+            print(f"   [주의] 접합부 검증 건너뜀: {ex}")
 
     kept = sum(b - a for a, b in keeps)
     removed = info["duration"] - kept

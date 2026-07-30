@@ -11,6 +11,11 @@ setup_check.py — 새 PC에서 이 도구를 돌릴 준비가 됐는지 점검�
 import sys, os, subprocess, shutil, platform, argparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# 모델을 프로젝트 안에 받게 한다(외장 SSD 를 오갈 때 OS 마다 재다운로드 방지).
+# --install 이 띄우는 자식 프로세스도 이 값을 물려받는다. make_subtitles.py 와 같은 규칙.
+os.environ.setdefault("HF_HOME", os.path.join(HERE, ".hf-cache"))
+
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 IS_ARM_MAC = IS_MAC and platform.machine() == "arm64"
@@ -109,12 +114,20 @@ def check_gpu(install):
 
 
 def check_model(install):
-    """전사 모델은 프로젝트 폴더가 아니라 ~/.cache 에 받아진다(USB 로 안 따라옴)."""
-    cache = os.path.expanduser("~/.cache/huggingface/hub")
-    hit = os.path.isdir(cache) and any("large-v3-turbo" in d for d in os.listdir(cache))
-    if hit:
-        say(OK, "전사 모델", "캐시에 있음")
-        return
+    """전사 모델은 프로젝트 안 `.hf-cache/` 에 받는다 — 외장 SSD 를 오가도 따라온다.
+
+    `make_subtitles.py` 가 HF_HOME 을 거기로 잡는다. 사용자 홈(~/.cache/huggingface)에
+    예전에 받아둔 게 있으면 그것도 인정한다(HF_HOME 을 직접 쓰는 환경 포함).
+    """
+    roots = [os.path.join(HERE, ".hf-cache", "hub")]
+    if os.environ.get("HF_HOME"):
+        roots.append(os.path.join(os.environ["HF_HOME"], "hub"))
+    roots.append(os.path.expanduser("~/.cache/huggingface/hub"))
+    for cache in roots:
+        if os.path.isdir(cache) and any("large-v3-turbo" in d for d in os.listdir(cache)):
+            where = "프로젝트 .hf-cache" if cache.startswith(HERE) else cache
+            say(OK, "전사 모델", f"캐시에 있음 ({where})")
+            return
     say(BAD, "전사 모델", "~1.6GB 첫 실행 시 다운로드 (인터넷 필요)")
     if not install:
         actions.append("python setup_check.py --install   (모델 미리 받기)")

@@ -23,6 +23,10 @@ output/
 .venv-win/
 .venv/
 
+# 전사 모델 캐시 (약 1.6GB). 프로젝트 안에 두어 외장 SSD 를 오가도 재다운로드가 없게 한다.
+# make_subtitles.py / setup_check.py 가 HF_HOME 을 여기로 잡는다. 커밋은 하지 않는다.
+.hf-cache/
+
 # 파이썬 캐시
 __pycache__/
 *.pyc

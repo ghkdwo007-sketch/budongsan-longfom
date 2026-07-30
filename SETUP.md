@@ -27,15 +27,22 @@ Claude Code 로 폴더를 열고 "세팅해줘" 라고 해도 됩니다 — 같�
 ## 2-1) 설치 — 수동
 
 **Windows**
+
+`edit.sh`·`batch.sh` 가 윈도우에서 `.venv-win` 을 찾으므로 venv 로 만듭니다.
+(시스템 파이썬에 깔면 `python engine/...` 직접 호출만 되고 셸 스크립트는 안 됩니다)
+
 ```bash
 winget install Gyan.FFmpeg
-pip install -r requirements.txt
+python -m venv .venv-win
+.venv-win/Scripts/python -m pip install -r requirements.txt
 ```
 
 NVIDIA GPU로 전사를 가속하려면 (없으면 CPU로 돌아감, 대신 느림):
 ```bash
-pip install nvidia-cublas-cu12 "nvidia-cudnn-cu12>=9,<10"
+.venv-win/Scripts/python -m pip install nvidia-cublas-cu12 "nvidia-cudnn-cu12>=9,<10"
 ```
+
+cudnn/cublas 가 커서 venv 가 약 3.3GB 됩니다.
 
 **macOS (Apple Silicon)**
 
@@ -106,3 +113,28 @@ git 의 `core.precomposeunicode=true` 도 켜 둡니다(맥에서 `setup_check.p
 
 **`._*` 파일은 무시하세요.** exFAT에는 맥이 파일마다 리소스 포크 사이드카를 만듭니다.
 윈도우에서 잡동사니로 보이지만 지워도 되고 `.gitignore` 에서 걸러집니다.
+
+**git `safe.directory` 는 OS별로 한 번씩 등록해야 합니다.** exFAT는 파일 소유권을 기록하지 않아
+git이 `dubious ownership` 으로 **모든 명령을 거부**합니다. 이 설정은 사용자 홈(`~/.gitconfig`)에
+들어가서 **드라이브를 따라가지 않고**, 경로도 OS마다 다릅니다.
+
+```bash
+# 윈도우
+git config --global --add safe.directory E:/budongsan-longfom/PremierePro-edit
+# 맥
+git config --global --add safe.directory /Volumes/T7/budongsan-longfom/PremierePro-edit
+```
+
+반대로 `core.filemode=false` · `symlinks=false` · `ignorecase=true` · `precomposeunicode=true` 는
+`.git/config`, 즉 **드라이브 안에** 있어서 두 OS가 그대로 공유합니다. 다시 설정할 필요 없습니다.
+
+**드라이브 문자·마운트 지점이 바뀌면 venv 경로와 프리미어 미디어 링크가 전부 틀어집니다.**
+윈도우는 디스크 관리에서 문자를 고정해 두세요(현재 `E:`). 맥은 볼륨 이름으로 붙습니다(`/Volumes/T7`).
+
+**반드시 안전 제거(꺼내기) 후 뽑으세요.** exFAT는 저널링이 없어서 300MB짜리 WAV를 쓰는 중에
+뽑으면 그 파일이 그대로 깨집니다.
+
+**전사 모델 캐시는 프로젝트 안 `.hf-cache/` 에 있습니다** (약 1.6GB, git 제외).
+`make_subtitles.py`·`setup_check.py` 가 `HF_HOME` 을 거기로 잡으므로 드라이브를 따라옵니다 —
+새 PC·새 OS 에서 1.6GB 를 다시 받지 않습니다. 기본값(`~/.cache/huggingface`)은 사용자 홈이라
+드라이브를 안 따라오기 때문입니다. `HF_HOME` 을 직접 쓰는 환경이면 그 값이 우선합니다.

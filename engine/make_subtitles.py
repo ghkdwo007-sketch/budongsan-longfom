@@ -17,6 +17,15 @@ make_subtitles.py — 컷된 타임라인에 정렬된 SRT 자막 생성 (로컬
 import sys, os, subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# 전사 모델 캐시를 프로젝트 안(.hf-cache)에 둔다. 기본값 ~/.cache/huggingface 는 사용자 홈이라
+# 외장 SSD 를 맥↔윈도우로 오갈 때 따라오지 않아 OS 마다 1.6GB 를 다시 받는다.
+# faster_whisper·mlx_whisper 임포트는 함수 안에서 일어나므로 여기서 잡아도 늦지 않다.
+# 이미 HF_HOME 을 쓰는 환경이면 그 값을 존중한다.
+os.environ.setdefault(
+    "HF_HOME",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".hf-cache"))
+
 from silence_cut import (probe_media, detect_silence, keep_ranges_from_silence,
                          FFMPEG, run, VOICE_CHAIN)
 

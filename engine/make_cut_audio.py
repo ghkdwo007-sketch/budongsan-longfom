@@ -19,6 +19,14 @@ import sys, os, re, subprocess
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from silence_cut import FFMPEG, FFPROBE, run, probe_media
 
+# 윈도우 콘솔 기본 인코딩(cp949)에는 em dash 같은 기호가 없어 출력하다 죽는다.
+# 한글은 cp949 에 있어서 평소엔 안 드러나다가 --help 나 기호가 섞이면 터진다.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
+
 # 프레임→샘플 변환은 반드시 **소스 실제 fps** 로 해야 한다. 상수로 29.97 을 쓰면
 # 59.94p 촬영본에서 오디오가 정확히 2배로 어긋난다(_cut.xml 의 프레임은 소스 fps 단위).
 

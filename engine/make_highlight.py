@@ -48,6 +48,14 @@ import make_edl
 from make_edl import frames_to_df, parse_keeps, reel, tc_rate
 from silence_cut import probe_media
 
+# 윈도우 콘솔 기본 인코딩(cp949)에는 em dash 같은 기호가 없어 출력하다 죽는다.
+# 한글은 cp949 에 있어서 평소엔 안 드러나다가 --help 나 기호가 섞이면 터진다.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
+
 
 def parse_t(v):
     """'12:34' · '1:02:03' · 74.5 → 초."""

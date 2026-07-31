@@ -19,6 +19,14 @@ import sys, os, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import make_subtitles as MS          # 한국어 어미 사전 + end_score 재사용
 
+# 윈도우 콘솔 기본 인코딩(cp949)에는 em dash 같은 기호가 없어 출력하다 죽는다.
+# 한글은 cp949 에 있어서 평소엔 안 드러나다가 --help 나 기호가 섞이면 터진다.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
+
 # ── 설정 ──
 # 한 줄 최대 글자수. 비블 자막은 '한 줄 + 검은 박스' 스타일이라 화면 폭에 바로 걸린다.
 # 레퍼런스 프레임(1920 기준) 실측: 25자가 화면 폭의 약 2/3 — 이걸 상한으로 잡는다.

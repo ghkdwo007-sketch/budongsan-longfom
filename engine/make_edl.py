@@ -22,6 +22,14 @@ import sys, os, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from silence_cut import probe_media, FFPROBE, run
 
+# 윈도우 콘솔 기본 인코딩(cp949)에는 em dash 같은 기호가 없어 출력하다 죽는다.
+# 한글은 cp949 에 있어서 평소엔 안 드러나다가 --help 나 기호가 섞이면 터진다.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
+
 NTSC_FPS = 30000 / 1001            # 기본값(29.97). 실제 소스 fps 는 main() 이 FPS 에 넣는다.
 FPS = NTSC_FPS
 

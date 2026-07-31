@@ -15,6 +15,14 @@ edit_diff.py — 엔진 러프컷 vs 사용자 최종본 비교(편집 학습 �
 """
 import sys, os, json, re, difflib, statistics
 
+# 윈도우 콘솔 기본 인코딩(cp949)에는 em dash 같은 기호가 없어 출력하다 죽는다.
+# 한글은 cp949 에 있어서 평소엔 안 드러나다가 --help 나 기호가 섞이면 터진다.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
+
 def norm(t):
     return re.sub(r"[^\w가-힣]", "", t).lower()
 

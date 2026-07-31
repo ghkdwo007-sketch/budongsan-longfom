@@ -12,6 +12,14 @@ transcript_export.py — 전사본(_words.json)을 LLM 분석용 타임코드 �
 
 import sys, os, json
 
+# 윈도우 콘솔 기본 인코딩(cp949)에는 em dash 같은 기호가 없어 출력하다 죽는다.
+# 한글은 cp949 에 있어서 평소엔 안 드러나다가 --help 나 기호가 섞이면 터진다.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
+
 GAP_PARA = 1.0    # 이 간격(초) 이상 쉬면 문단 분리
 MAX_PARA = 280    # 문단 최대 글자수(너무 길면 강제 분리)
 

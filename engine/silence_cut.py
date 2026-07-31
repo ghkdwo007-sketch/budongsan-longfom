@@ -67,6 +67,14 @@ def path_to_url(path):
 
 
 import shutil as _shutil
+
+# 윈도우 콘솔 기본 인코딩(cp949)에는 em dash 같은 기호가 없어 출력하다 죽는다.
+# 한글은 cp949 에 있어서 평소엔 안 드러나다가 --help 나 기호가 섞이면 터진다.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
 FFPROBE = _shutil.which("ffprobe") or os.path.expanduser("~/bin/ffprobe")
 HAS_FFPROBE = os.path.exists(FFPROBE) if "/" in FFPROBE else bool(_shutil.which("ffprobe"))
 

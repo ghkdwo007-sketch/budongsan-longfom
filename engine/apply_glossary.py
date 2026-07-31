@@ -16,6 +16,14 @@ Whisper 오인식은 회차마다 조금씩 형태가 달라서, 매번 손으�
 """
 import sys, os, re, shutil
 
+# 윈도우 콘솔 기본 인코딩(cp949)에는 em dash 같은 기호가 없어 출력하다 죽는다.
+# 한글은 cp949 에 있어서 평소엔 안 드러나다가 --help 나 기호가 섞이면 터진다.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
+
 PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

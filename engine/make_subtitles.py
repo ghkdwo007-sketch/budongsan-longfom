@@ -29,6 +29,14 @@ os.environ.setdefault(
 from silence_cut import (probe_media, detect_silence, keep_ranges_from_silence,
                          FFMPEG, run, VOICE_CHAIN)
 
+# 윈도우 콘솔 기본 인코딩(cp949)에는 em dash 같은 기호가 없어 출력하다 죽는다.
+# 한글은 cp949 에 있어서 평소엔 안 드러나다가 --help 나 기호가 섞이면 터진다.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
+
 # ── 자막 줄 묶기 설정 (의미 단위 분할) ──
 MIN_CHARS  = 25     # 한 자막 최소 글자수(공백 포함) — 너무 짧으면 다음과 묶음
 MAX_CHARS  = 35     # 한 자막 최대 글자수(공백 포함)

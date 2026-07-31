@@ -91,7 +91,7 @@ python engine/apply_grade_still.py "<이미지>" --compare  # 원본과 나란�
 전체에 넣으면 오래 걸린다 — 비블이 첫 컷을 복사해 **특성 붙여넣기**로 퍼뜨린다.
 
 ```bash
-python engine/apply_grade_premiere.py "<시퀀스 이름 일부>"   # 맨 앞 1컷
+python engine/auto_grade.py "<원본.MP4>" "<시퀀스 이름 일부>"   # 재서 스스로 잡기
 ```
 
 값은 `profiles/budongsan-longfom/grade_lumetri.json`. 색상 휠은 블롭째 저장돼 있어

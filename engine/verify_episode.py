@@ -175,10 +175,20 @@ def main():
     if os.path.exists(e1):
         r1 = rows(e1)
         check(len(r1) == len(keeps), "cam01 이벤트 수 = 컷 수", f"{len(r1)} vs {len(keeps)}")
-        # EDL 은 TC 기준(59.94p 면 소스 2프레임=TC 1프레임)이라 컷도 같은 기준으로 접어 비교
-        keeps_tc = [(int(round(a / TCDIV)), int(round(b / TCDIV))) for a, b in keeps]
-        check(all((si, so) == k for (si, so, _a, _b), k in zip(r1, keeps_tc)),
-              "cam01 소스 in/out = XML 컷")
+        # EDL 은 TC 기준(59.94p 면 소스 2프레임=TC 1프레임)이라 컷도 같은 기준으로 접어 비교.
+        # 마지막 컷이 미디어 끝을 몇 프레임 넘으면 make_edl 이 소스 구간만 안으로 당긴다
+        # (클램프 — 컷 개수·레코드 TC 는 그대로 두려는 의도된 동작이라 실패가 아니다).
+        # 같은 기준으로 접어 비교하려면 기대값에도 같은 클램프를 걸어야 한다.
+        mlen = int(round(probe_media(master)["duration"] * FPS / TCDIV)) if os.path.exists(master) else None
+        def clamp(a, b):
+            if mlen is None or b <= mlen:
+                return a, b
+            return a - (b - mlen), mlen          # 길이는 유지한 채 뒤로만 당긴다
+        keeps_tc = [clamp(int(round(a / TCDIV)), int(round(b / TCDIV))) for a, b in keeps]
+        off = [i + 1 for i, ((si, so, _a, _b), k) in enumerate(zip(r1, keeps_tc))
+               if (si, so) != k]
+        check(not off, "cam01 소스 in/out = XML 컷",
+              "" if not off else f"이벤트 {off} 불일치")
         check(r1[0][2] == 0, "레코드 00:00:00:00 시작")
         check(all(r1[i][2] == r1[i-1][3] for i in range(1, len(r1))), "레코드 연속(갭 없음)")
 

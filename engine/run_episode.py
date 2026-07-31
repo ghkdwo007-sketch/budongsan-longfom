@@ -29,6 +29,9 @@ PROJ = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 PY = sys.executable
 
+from make_edl import source_tc, df_to_frames      # --skip-remux 의 자정 넘김 사전 검사
+from silence_cut import probe_media
+
 
 def run(cmd, **kw):
     env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
@@ -80,8 +83,22 @@ def main():
     # ── 0) TC0 사본 ──────────────────────────────────────────────
     step(0, "TC0 사본 (프리미어 연결용 · EDL 과 TC 기준을 맞춘다)")
     if a.skip_remux:
-        print("   건너뜀 (--skip-remux)")
+        print("   건너뜀 (--skip-remux) — 원본에 그대로 연결한다")
         tc1 = tc2 = None
+        # 사본 없이 가려면 원본의 실제 TC 로 EDL 을 쓰는 수밖에 없는데, TC 가 자정을 넘으면
+        # 23:59:59;29 → 00:00:00;00 으로 되돌아가 이벤트 TC 가 미디어 시작 TC 보다 작아진다
+        # (= 매칭 실패). 그런 소스는 TC0 사본이 반드시 필요하다 — 미리 잡아서 알린다.
+        for label, path in (("cam01", a.cam1), ("cam02", a.cam2)):
+            if not path:
+                continue
+            tc = source_tc(path)
+            n = probe_media(path)["fps"]
+            fold = 2 if n > 30 else 1          # 59.94 → 29.97 로 접어서 센다
+            end = df_to_frames(tc) + int(round(probe_media(path)["duration"] * n / fold))
+            if end > df_to_frames("23:59:59;29") + 1:
+                sys.exit(f"[중단] {label} 의 TC 가 자정을 넘는다 ({tc}). "
+                         f"이 소스는 --skip-remux 로 갈 수 없다 — 사본을 만들어야 한다.")
+            print(f"   {label} 시작 TC {tc} · 자정 안 넘음 → 실제 TC EDL 사용 가능")
     else:
         tc1 = tc0_copy(a.cam1)
         tc2 = tc0_copy(a.cam2) if a.cam2 else None
@@ -152,9 +169,20 @@ def main():
         print(f"  자세한 순서·구간 근거: output/{base}_categories.md")
         print(f"{'='*66}")
         return
-    print(f"  V1  {base}_cam01_v_tc0.edl   → CAM01 을 {os.path.basename(tc1) if tc1 else 'cam01 TC0 사본'} 에 연결")
+    # 사본을 안 만들었으면(--skip-remux) TC0 EDL 을 쓰면 안 된다. TC0 EDL 은 소스 TC 를 0 으로
+    # 쓰는데 원본에는 실제 TC(예: 05:59:45;03)가 박혀 있어, 프리미어가 둘을 못 맞추고
+    # 23시간짜리 유령 클립을 만들며 컷이 전부 어긋난다(실측). 실제 TC 변형(_v.edl)을 쓴다.
+    if tc1:
+        v1, v2, link1 = "_cam01_v_tc0.edl", "_cam02_v_tc0.edl", os.path.basename(tc1)
+        link2 = os.path.basename(tc2) if tc2 else None
+    else:
+        v1, v2, link1 = "_cam01_v.edl", "_cam02_v.edl", os.path.basename(a.cam1)
+        link2 = os.path.basename(a.cam2) if a.cam2 else None
+        print("  [사본 없음] 원본의 실제 TC 를 그대로 쓰는 _v.edl 을 쓴다 "
+              "— _v_tc0.edl 은 이 모드에서 쓰면 안 된다")
+    print(f"  V1  {base}{v1}   → CAM01 을 {link1} 에 연결")
     if a.cam2:
-        print(f"  V2  {base}_cam02_v_tc0.edl   → CAM02 를 {os.path.basename(tc2) if tc2 else 'cam02 TC0 사본'} 에 연결")
+        print(f"  V2  {base}{v2}   → CAM02 를 {link2} 에 연결")
         print(f"      cam02 시퀀스 전체 복사 → cam01 시퀀스 V2 에 00:00:00:00 기준 붙여넣기")
     print(f"  A1  {base}_cut_audio_flat.wav → 00:00:00:00 에 배치")
     print(f"  자막 {base}_cut.srt")

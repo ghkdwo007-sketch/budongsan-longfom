@@ -1,17 +1,19 @@
-"""두 캠을 같은 톤·밝기로 맞춘다.
+"""두 캠을 같은 톤·밝기로 맞춘다 — **기준 캠 대비 상대 매칭**이 기본이다.
 
     python engine/match_cams.py "<cam01.MP4>" "<cam02.MP4>" --at 300 600 900
 
-**왜 '각 캠에 60% 적용'으로는 안 맞나** — 60% 는 *그 소스 기준의 상대량*이라, 캐스트와
-노출이 다른 두 캠에 각각 60% 를 먹이면 **도착점이 서로 다르다.** 캠 매칭은 상대량이 아니라
-**같은 도착점으로 수렴시키는 문제**다.
+**왜 상대 매칭인가** (비블, 2026-07-31): **"고정 값이라는 건 존재하지 않는다.
+도착점도 외부에서 찍느냐 노출이 강한 곳에서 찍느냐에 따라 전부 달라진다."**
 
-그래서 이 도구는 캠마다 **따로** 푼다 — 목표는 하나, 파라미터는 캠별로 다르게.
-목표는 `profiles/<프로파일>/tone_reference.json` 의 '도착점'이고, 그건 비블이
-"거의 완벽하다"고 확인한 화면의 수치다.
+절대 목표(저장된 수치)로 수렴시키면 실내 스튜디오에서만 맞는다. 야외·역광이면
+`neutral_mask` 가 하늘이나 바닥을 '중성면'으로 잡고, 중앙값 같은 절대 밝기도 의미가 없다.
+**반면 "cam02 를 cam01 에 맞춘다"는 환경이 바뀌어도 항상 유효하다** — 상대값이니까.
 
-맞추는 항목: 벽(중성면) R·G·B · 루마 중앙값 · p90 · 화면 채도.
-**벽을 맞추는 게 제일 중요하다** — 두 캠의 벽 색이 다르면 컷이 바뀔 때마다 색이 튄다.
+그래서 기본 동작은 `--ref-cam 1`(첫 캠 기준)이다. 기준 캠 자체는 소스를 재서 스스로 잡고
+(`eye_grade`), 나머지 캠은 그 **결과**에 맞춘다.
+
+**맞추는 우선순위: 피부톤 → 벽 → 밝기.** 벽만 맞추면 얼굴이 창백하게 남는다(실측 피부 G
+14.7 차이). 프레이밍이 다르면 `p90` 은 뺀다 — 밝은 영역 비율이 달라 오히려 어긋난다.
 """
 import argparse
 import json
@@ -132,14 +134,24 @@ if __name__ == "__main__":
     ap.add_argument("--at", type=float, nargs="+", default=[300, 600, 900])
     ap.add_argument("--profile", default="부동산롱폼")
     ap.add_argument("--outdir", default=None)
-    ap.add_argument("--ref-cam", type=int, default=None,
-                    help="이 캠(1부터)의 보정 결과를 기준으로 나머지를 맞춘다")
+    ap.add_argument("--ref-cam", type=int, default=1,
+                    help="이 캠(1부터)의 보정 결과를 기준으로 나머지를 맞춘다 (기본 1)")
+    ap.add_argument("--use-stored-target", action="store_true",
+                    help="저장된 도착점(tone_reference.json)으로 수렴시킨다. "
+                         "**실내 스튜디오 전용** — 환경이 다르면 쓰지 말 것")
     a = ap.parse_args()
 
-    target = load_target(a.profile)
     tmp = a.outdir or tempfile.mkdtemp(prefix="match_")
     os.makedirs(tmp, exist_ok=True)
-    print("목표(도착점):", " ".join(f"{k} {v}" for k, v in target.items()))
+    if a.use_stored_target:
+        target = load_target(a.profile)
+        print("[주의] 저장된 도착점으로 수렴시킨다 — 260729 실내 스튜디오 기준이다.")
+        print("       야외·역광·노출이 다른 환경이면 이 숫자는 맞지 않는다.")
+        print("목표:", " ".join(f"{k} {v}" for k, v in target.items()))
+        a.ref_cam = None
+    else:
+        target = None
+        print(f"기준 캠: cam{a.ref_cam} (상대 매칭 — 환경이 바뀌어도 유효하다)")
 
     # 기준 캠이 지정되면 그 캠을 먼저 풀고, 그 **결과**를 나머지의 목표로 삼는다.
     # 저장된 도착점보다 실제 화면이 낫다고 비블이 판단하면 이 모드를 쓴다.

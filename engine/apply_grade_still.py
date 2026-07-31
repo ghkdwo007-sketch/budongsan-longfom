@@ -25,9 +25,13 @@ from PIL import Image
 sys.stdout.reconfigure(encoding="utf-8")
 
 SAT_MUL = 127.74 / 163.23           # 0.7826
-WHEELS = [("어두운 영역", 35.29, 0.032, 0.115),
-          ("미드톤", 21.72, 0.846, 0.191),
-          ("밝은 영역", 20.65, 0.940, 0.100)]
+# 비블이 프리미어에서 직접 잡은 값(260729 cam02 샘플, 2026-07-31).
+# **밝은 영역 루마가 0.33 — 중앙(0.5) 아래로 내린다.** 1.0 으로 밀어올렸다가
+# "화이트가 다 날아가 옷 주름이 안 보인다"는 지적을 받았다.
+# 어두운 영역도 0.33 으로 올려야 머리카락이 안 뭉갠다(0.18 은 너무 무겁다).
+WHEELS = [("어두운 영역", 68.20, 0.3253, 0.0038),
+          ("미드톤", 256.87, 0.8995, 0.0440),
+          ("밝은 영역", 326.85, 0.3317, 0.1672)]
 
 # 각도 → RGB 방향. **0° = 빨강, 양수 = 노랑 쪽(주황/웜)** 으로 확정했다.
 # 비블이 세 후보 중 +35.3°(주황) 를 골랐다 — R+0.66 G+0.08 B-0.75 로
@@ -57,7 +61,7 @@ def zone_weights(luma):
 
 
 def grade(img, tint="warm", luma_scale=0.18, sat_mul=SAT_MUL, tint_scale=0.35,
-          shadow_luma=None):
+          shadow_luma=None, mid_luma=None, high_luma=None):
     """shadow_luma 로 섀도우 휠의 루마를 덮어쓴다(기본 0.032 = 읽어낸 값).
 
     **블랙을 푸는 건 나중에 들어올리는 게 아니라 여기서 덜 누르는 것이다.**
@@ -72,9 +76,10 @@ def grade(img, tint="warm", luma_scale=0.18, sat_mul=SAT_MUL, tint_scale=0.35,
     # ① 휠 루마 — 0.5 를 중립으로 보고 편차를 밝기 오프셋으로
     off = np.zeros_like(x)
     tint_vec = np.zeros_like(x)
+    override = (shadow_luma, mid_luma, high_luma)
     for i, ((name, ang, lum, sat), w) in enumerate(zip(WHEELS, (sh, mid, hi))):
-        if i == 0 and shadow_luma is not None:
-            lum = shadow_luma
+        if override[i] is not None:
+            lum = override[i]
         off += w * ((lum - 0.5) * 2.0 * luma_scale)
         tint_vec += w * (TINTS[tint](ang) * sat * tint_scale)
     x = x + off + tint_vec
@@ -132,7 +137,8 @@ def stats(img, label):
 # 낮게 나온다(29.76% vs 원본 31.63%) — 앞단의 전체 채도 ×0.98 을 겨우 상쇄하는 수준이라
 # 피부가 안 산다. 값이 아니라 방식을 재사용한다는 게 여기서 실제로 드러났다.
 RECIPE = dict(tint="warm", luma_scale=0.18, tint_scale=0.27,
-              sat_ui=98, whites=0.12, shadow_luma=0.50, blue_points=5, skin_points=80)
+              sat_ui=98, whites=0.31, shadow_luma=0.3253, mid_luma=0.8995,
+              high_luma=0.3317, contrast=0.0, blue_points=15, skin_points=80)
 
 
 def knee(x, t=0.85):
@@ -145,6 +151,22 @@ def lift_whites(img, amount):
     x = img.astype(np.float32) / 255.0
     w = np.clip((x @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32) - 0.25) / 0.75, 0, 1) ** 0.8
     return (np.clip(knee(x * (1.0 + amount * w)[..., None]), 0, 1) * 255).astype(np.uint8)
+
+
+def apply_contrast(img, amount):
+    """미드톤 대비(S커브). 들어올리기만으로는 못 만드는 '또렷함'을 담당한다.
+
+    **이게 없어서 "밝고 창백하다"는 피드백을 받았다** — 파이프라인에 올리는 수단만 있고
+    대비를 세우는 수단이 없으니, 목표 밝기를 맞추려면 미드톤을 통째로 들 수밖에 없었다
+    (실측: 중앙값 182 / 대비 182, 승인본은 중앙값 162 / 대비 205).
+    """
+    if not amount:
+        return img
+    x = img.astype(np.float32) / 255.0
+    x = (x - 0.5) * (1.0 + amount) + 0.5
+    x = np.where(x > 0.85, 0.85 + 0.15 * np.tanh((x - 0.85) / 0.15), x)
+    x = np.where(x < 0.10, 0.10 - 0.10 * np.tanh((0.10 - x) / 0.10), x)
+    return (np.clip(x, 0, 1) * 255).astype(np.uint8)
 
 
 def blue_tint(img, points):
@@ -197,9 +219,11 @@ def full_grade(src, **kw):
     r = dict(RECIPE, **kw)
     x = grade(src, tint=r["tint"], luma_scale=r["luma_scale"],
               sat_mul=r["sat_ui"] / 100.0, tint_scale=r["tint_scale"],
-              shadow_luma=r["shadow_luma"])
+              shadow_luma=r["shadow_luma"], mid_luma=r["mid_luma"],
+              high_luma=r["high_luma"])
     x = whitebalance(x)                              # ③ 캐스트 제거
     x = whitebalance(lift_whites(x, r["whites"]))    # ④ 밝기 (올린 뒤 다시 중성화)
+    x = apply_contrast(x, r["contrast"])             # ⑤ 대비 — 창백해지지 않게
     x = blue_tint(x, r["blue_points"])               # ⑥ 아주 살짝 쿨하게
     return boost_skin(x, r["skin_points"])           # ⑦ 피부만 살리기
 

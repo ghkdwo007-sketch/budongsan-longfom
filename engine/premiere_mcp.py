@@ -22,16 +22,64 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
-SERVER = os.environ.get(
-    "PREMIERE_MCP_SERVER", r"C:\Users\USER\Adobe_Premiere_Pro_MCP\dist\index.js")
-TEMP = os.environ.get("PREMIERE_TEMP_DIR", r"C:\temp\premiere-mcp-bridge")
+def _find_server():
+    """MCP 서버(dist/index.js)를 찾는다 — PC 마다 설치 위치가 다르다.
+
+    ① 환경변수 `PREMIERE_MCP_SERVER`
+    ② Claude 설정(`~/.claude.json`)의 mcpServers 에 등록된 경로
+    ③ 홈/다운로드 아래 흔한 폴더명
+    """
+    env = os.environ.get("PREMIERE_MCP_SERVER")
+    if env and os.path.exists(env):
+        return env
+
+    cfg = Path.home() / ".claude.json"
+    if cfg.exists():
+        try:
+            servers = json.loads(cfg.read_text(encoding="utf-8")).get("mcpServers") or {}
+            for name, spec in servers.items():
+                if "premiere" not in name.lower():
+                    continue
+                for arg in spec.get("args") or []:
+                    if str(arg).endswith(".js") and os.path.exists(arg):
+                        return arg
+        except (ValueError, OSError):
+            pass
+
+    home = Path.home()
+    for base in (home, home / "Downloads", home / "Documents", Path("/opt"), Path("/usr/local")):
+        for name in ("Adobe_Premiere_Pro_MCP", "Adobe_Premiere_Pro_MCP-main",
+                     "premiere-pro-mcp", "mcp-adobe-premiere-pro"):
+            p = base / name / "dist" / "index.js"
+            if p.exists():
+                return str(p)
+    return ""
+
+
+def _default_temp():
+    """CEP 브리지가 파일을 주고받는 폴더. 패널의 Temp Directory 와 같아야 한다."""
+    if os.name == "nt":
+        return r"C:\temp\premiere-mcp-bridge"
+    return str(Path(tempfile.gettempdir()) / "premiere-mcp-bridge")
+
+
+SERVER = _find_server()
+TEMP = os.environ.get("PREMIERE_TEMP_DIR", _default_temp())
 
 
 class Premiere:
     """MCP 서버를 자식 프로세스로 띄우고 JSON-RPC 로 대화한다."""
 
     def __init__(self):
+        if not SERVER:
+            raise SystemExit(
+                "프리미어 MCP 서버를 못 찾았다.\n"
+                "  ① 리포지토리를 받아 `npm install && npm run build` (dist/index.js 생성)\n"
+                "  ② 경로를 알려준다:  set PREMIERE_MCP_SERVER=<...>\\dist\\index.js\n"
+                "  (mac/linux: export PREMIERE_MCP_SERVER=<...>/dist/index.js)")
         self.p = subprocess.Popen(
             ["node", SERVER],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,

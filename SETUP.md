@@ -138,3 +138,54 @@ git config --global --add safe.directory /Volumes/T7/budongsan-longfom/PremiereP
 `make_subtitles.py`·`setup_check.py` 가 `HF_HOME` 을 거기로 잡으므로 드라이브를 따라옵니다 —
 새 PC·새 OS 에서 1.6GB 를 다시 받지 않습니다. 기본값(`~/.cache/huggingface`)은 사용자 홈이라
 드라이브를 안 따라오기 때문입니다. `HF_HOME` 을 직접 쓰는 환경이면 그 값이 우선합니다.
+
+## 6) 학습 내용은 어떻게 따라오는가
+
+회차를 거듭하며 알아낸 것(컷·자막·색보정 기준)은 **드라이브 안에** 있어야 다른 환경에서도
+이어집니다. 무엇이 따라오고 무엇이 안 따라오는지:
+
+| | 위치 | 드라이브를 따라오나 |
+|---|---|---|
+| 학습 요약 | `LEARNED.md` | ✅ (git 포함) |
+| 상세 근거·수치 | `profiles/budongsan-longfom/README.md` | ✅ |
+| 자막 교정 사전 | `profiles/budongsan-longfom/glossary.txt` | ✅ |
+| 색보정 레시피 | `engine/apply_grade_still.py` 의 `RECIPE` | ✅ |
+| 학습 루프 기준선 | `output/_prev_260728_부동산/`, `output/_v207_260730/` | ⚠️ **git 제외 — 드라이브에만** |
+| Claude 메모리 | 작업 PC 의 `~/.claude/projects/.../memory/` | ❌ **안 따라옴** |
+
+**`LEARNED.md` 가 메모리의 드라이브 사본입니다.** Claude Code 메모리는 작업 PC 사용자 폴더에
+저장돼서 SSD 를 따라오지 않습니다. 그래서 같은 내용을 `LEARNED.md` 에 두고 `CLAUDE.md` 맨 앞에서
+가리킵니다 — 새 환경에서 이 폴더를 열면 Claude 가 그걸 읽고 이어서 작업합니다.
+**새로 배운 게 생기면 메모리와 `LEARNED.md` 양쪽에 남기세요.**
+
+**기준선 폴더를 지우지 마세요.** `output/` 은 `.gitignore` 라 git 으로는 안 따라오지만
+드라이브에는 그대로 있습니다. 이게 있어야 다음 회차에 "엔진이 얼마나 어긋났는지"를 잽니다.
+git clone 으로 코드만 받은 환경에서는 이 비교가 안 됩니다 — **드라이브째 들고 다니는 이유입니다.**
+
+## 7) 프리미어 MCP (선택)
+
+비블의 수정본을 프리미어에서 직접 읽어 학습하는 경로입니다. 없어도 편집 파이프라인은 다 돕니다.
+
+**MCP 서버는 드라이브 밖에 있습니다** — 새 PC 에서 한 번 설치해야 합니다.
+
+```bash
+git clone <Adobe_Premiere_Pro_MCP 리포지토리>
+cd Adobe_Premiere_Pro_MCP && npm install && npm run build   # dist/index.js 생성
+```
+
+`engine/premiere_mcp.py` 가 서버를 **환경변수 → `~/.claude.json` → 흔한 폴더** 순으로 자동
+탐색합니다. 못 찾으면 알려주세요:
+
+```bash
+# 윈도우
+set PREMIERE_MCP_SERVER=C:\...\Adobe_Premiere_Pro_MCP\dist\index.js
+# 맥
+export PREMIERE_MCP_SERVER=/.../Adobe_Premiere_Pro_MCP/dist/index.js
+```
+
+쓰기 전에 **프리미어를 열고 CEP 브리지 패널에서 Start Bridge** 를 눌러야 합니다.
+패널의 Temp Directory 가 `PREMIERE_TEMP_DIR`(기본 `C:\temp\premiere-mcp-bridge`)와 같아야 합니다.
+
+```bash
+python engine/premiere_mcp.py get_project_info     # 연결 확인
+```

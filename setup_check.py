@@ -10,6 +10,14 @@ setup_check.py — 새 PC에서 이 도구를 돌릴 준비가 됐는지 점검�
 """
 import sys, os, subprocess, shutil, platform, argparse
 
+# 윈도우 콘솔은 기본이 cp949 라 한글·em dash 를 출력하다 UnicodeEncodeError 로 죽는다.
+# 이 스크립트가 새 PC 의 첫 관문이라 여기서 막히면 아무것도 못 한다.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # 모델을 프로젝트 안에 받게 한다(외장 SSD 를 오갈 때 OS 마다 재다운로드 방지).
@@ -71,7 +79,7 @@ def check_ffmpeg(install):
 
 
 def check_packages(install):
-    need = ["numpy", "scipy"]
+    need = ["numpy", "scipy", "PIL"]   # PIL(pillow) — 색보정·쇼츠 자막 렌더
     need += ["mlx_whisper"] if IS_ARM_MAC else ["faster_whisper"]
     missing = []
     for m in need:

@@ -6,6 +6,10 @@
 
 **트리거:** 비블 영상 편집 전반(기획~자막~쇼츠) 요청 시 `video-edit-pipeline` 스킬을 사용하라. 단일 작업은 전문 스킬 직접 호출 가능 — 컷편집만=`cut-editing`, 자막만=`subtitle-editing`, 리서치만=`content-research`, 기획만=`video-planning`, 검수만=`edit-direction`, 쇼츠만=`shorts-production`. 단순 질문은 직접 응답.
 
+**[먼저 읽을 것] `LEARNED.md`** — 비블의 실제 작업물과 대조해 알아낸 것들(컷·자막·색보정).
+문서에 적혀 있던 규칙이 실측과 반대인 경우가 여러 번 나왔으니, 작업 전에 이걸 본다.
+Claude 메모리는 작업 PC 에 저장돼 외장 SSD 를 안 따라오므로 **같은 내용을 이 파일에도** 남긴다.
+
 **프로그램 프로파일:** `profiles/<이름>/` — 코너별 설정·용어집·워크플로를 모아둔다.
 회차 작업은 해당 프로파일의 `README.md` 순서를 **그대로** 따르고, 새로 알게 된 건 그 문서와
 `glossary.txt` 에 계속 쌓는다.
@@ -51,6 +55,8 @@
 | 2026-07-30 | `silence_cut.run()`·`auto_cut` volumedetect 에 `encoding="utf-8"` 명시 | silence_cut, auto_cut | 한글 경로에서 ffmpeg 의 UTF-8 출력을 cp949 로 디코딩해 리더 스레드가 죽고 stderr 가 None → silencedetect 파싱이 `NoneType` 으로 터졌다 |
 | 2026-07-30 | 외장 SSD(exFAT) 맥↔윈도우 왕복 세팅 — `.venv-win` 생성 · **전사 모델 캐시를 프로젝트 `.hf-cache/` 로**(`HF_HOME`) · git `safe.directory` 는 OS별 등록 필요(홈에 저장돼 드라이브를 안 따라감) · 드라이브문자/안전제거 문서화 | SETUP.md, make_subtitles, setup_check, .gitignore | 프로젝트를 `E:\budongsan-longfom\PremierePro-edit`(T7 2TB)로 옮겨 두 OS에서 번갈아 작업. ① `edit.sh` 가 윈도우에서 `.venv-win` 을 찾는데 없어서 깨져 있었다 ② 모델 기본 캐시가 `~/.cache` 라 OS 마다 1.6GB 재다운로드였다 |
 | 2026-07-30 | **프리미어 MCP 로 수정본 직접 읽기** — `premiere_mcp.py`(stdio JSON-RPC 클라이언트) + `mcp_cut_diff.py`(3자 컷 비교) | engine(신규 2), 프로파일 README, BASELINE.md | 비블 완성본과 대조하려면 렌더+전사 또는 EDL 재내보내기가 필요했는데, 프리미어가 열려 있으면 MCP 로 클립별 소스 in/out 을 바로 읽을 수 있다. **실측 결과 '과잉 제거' 가정이 틀렸다** — 우리가 버린 3:52 중 비블이 되살린 건 3.1초뿐이고, 수정은 거의 전부 내용 컷(285컷 중 134컷 삭제, 26:14→13:50)이었다. 컷 경계 델타 중앙값은 0.000s = 패딩 값은 그대로 두면 된다 |
+| 2026-07-30 | **자막 학습 도구** — `prproj_captions.py`(.prproj gzip XML → base64 FlatBuffer 에서 캡션 추출) + `sub_diff.py`(우리 SRT ↔ 비블 수정 자막) · glossary 9항목 추가 | engine(신규 2), glossary, 프로파일 README, CLAUDE.md 자막 절 | 프리미어는 **캡션 읽기 API 가 없다**(MCP `read_sequence_captions` 가 항상 trackCount:0 — Adobe 제한). 실측 결과 **자막 규칙 2개가 틀렸다**: 온점·쉼표를 지우면 안 되고(비블 온점 225·쉼표 65), 25자는 상한이지 목표가 아니다(비블 중앙 15자). 줄 경계는 옳았다(이동 5건/633줄). 단독 리액션('네')은 본 자막에서 빼야 한다 — C1·C2 는 예능형 재미 자막 전용 레이어 |
+| 2026-07-30 | **Lumetri 색보정 읽기** — `read_grade.py`(ExtendScript 순회 + 색상 휠 블롭 디코드) | engine(신규), 프로파일 README | 비블의 색보정을 학습하려면 값을 읽어야 하는데 **MCP `list_clip_effects` 가 trackIndex/clipIndex 를 무시하고 항상 첫 클립만 준다**(실측). 보정한 건 cam01 뿐이고 **cam02 가 미보정 기준선**이라 차이가 곧 보정 내용이다: **기본 교정은 전부 0**(온도 슬라이더 안 씀), **크리에이티브 채도를 ×0.783 으로 낮추고 색상 휠 3개로 톤을 잡음**. 클립별이 아니라 **캠 전체에 보정 1개**(174클립 1가지). 저장값은 UI 눈금이 아니다(미보정 채도가 163.23) — 절대값 말고 기준선 대비로 볼 것 |
 
 ## [중요] Premiere Pro 26(2026) 호환
 
@@ -76,7 +82,15 @@
 
 ## 자막 스타일
 
-한 줄 **25자** (`subtitle_polish.MAX_CHARS_LINE`, 환경변수 `SUB_MAX_CHARS` 로 override).
+한 줄 **25자 상한** (`subtitle_polish.MAX_CHARS_LINE`, 환경변수 `SUB_MAX_CHARS` 로 override).
+
+> **[정정 2026-07-30] 비블 완성본을 재보니 두 가지가 틀렸다** (`engine/sub_diff.py`, 633줄↔757줄 일치율 99.9%).
+> ① **온점·쉼표를 지우면 안 된다** — 우리 온점 2·쉼표 0 vs 비블 온점 225·쉼표 65.
+> 물음표(68)·말줄임(13)이 정확히 같은 걸 보면 우리가 지운 걸 손으로 다시 찍은 것이다.
+> 모든 줄이 아니라 **문장이 끝나는 줄에만**(줄끝 온점 26.4%). `SUB_STRIP_PUNCT` 재검토 대상.
+> ② **25자는 상한이지 목표가 아니다** — 우리 중앙 19자(16~25자가 80%) vs 비블 중앙 15자.
+> 분할 목표를 15자 안팎으로 두고 25자는 상한으로만 쓴다.
+> 줄 경계 자체는 옳았다(경계 이동 5건/633줄). 상세는 부동산롱폼 프로파일 README.
 비블 자막은 '한 줄 + 검은 박스'라 화면 폭에 바로 걸린다 — 레퍼런스 프레임 실측 기준 25자가 폭의 약 2/3.
 분할은 그리디가 아니라 **균형 분할**(`_balanced_chunks`)로, `make_subtitles.end_score` 의 한국어 어미
 사전을 써서 자연스러운 자리에서 끊는다. (그리디는 '25자 + 7자' 식 토막을 대량 생성함)

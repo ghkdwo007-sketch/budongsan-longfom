@@ -91,6 +91,11 @@ def grade(img, tint="warm", luma_scale=0.18, sat_mul=SAT_MUL, tint_scale=0.35,
     return (np.clip(x, 0, 1) * 255).astype(np.uint8)
 
 
+# 화이트밸런스 기준으로 삼기에 최소한 필요한 중성면 픽셀 수(1280x720 의 0.01%).
+# 몇 픽셀만으로 채널 게인을 잡으면 노이즈 하나에 화면 전체 색이 끌려간다.
+MIN_NEUTRAL_PX = 100
+
+
 def neutral_mask(img):
     """원래 중성이어야 할 면(벽·천장)만 고른다 — 밝고 채도 낮은 픽셀.
 
@@ -112,6 +117,13 @@ def whitebalance(img):
     """
     f = img.astype(np.float32)
     m = neutral_mask(img)
+    # 중성면이 없으면(=벽이 안 보이는 타이트한 얼굴컷, 캐스트가 너무 세서 벽조차 sat 임계를
+    # 넘는 프레임) 평균이 NaN 이 되고, 그게 곱해져 결과가 통째로 검게 저장된다.
+    # 기준이 없으면 보정하지 않는 게 맞다 — 잘못 잡느니 원본을 그대로 넘긴다.
+    if m.sum() < MIN_NEUTRAL_PX:
+        print(f"  [건너뜀] 화이트밸런스 — 중성면 픽셀 {m.sum()}개 (최소 {MIN_NEUTRAL_PX}). "
+              f"벽·천장이 보이는 컷으로 기준을 잡을 것", file=sys.stderr)
+        return img
     means = np.array([f[..., c][m].mean() for c in range(3)])
     return np.clip(f * (means.mean() / means), 0, 255).astype(np.uint8)
 
@@ -232,12 +244,15 @@ def report(img, label):
     """중성면 편차와 '날아간 픽셀'까지 같이 본다 — 둘 다 매번 확인할 것."""
     f = img.astype(np.float32)
     lum = f @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
-    nm = [f[..., c][neutral_mask(img)].mean() for c in range(3)]
+    m = neutral_mask(img)
     mx, mn = f.max(2), f.min(2)
     sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1), 0)
     sk = skin_mask(img)
+    # 마스크가 비면 nan 이 찍혀 표가 읽히지 않는다 — '없음' 이라고 쓴다.
+    rb = f"{f[..., 0][m].mean() - f[..., 2][m].mean():+5.2f}" if m.any() else "  없음"
+    skv = f"{sat[sk].mean()*100:5.2f}%" if sk.any() else "  없음"
     print(f"  {label:<16} 밝기 {lum.mean():6.2f}  채도 {sat.mean()*100:5.2f}%  "
-          f"피부채도 {sat[sk].mean()*100:5.2f}%  중성면 R−B {nm[0]-nm[2]:+5.2f}  "
+          f"피부채도 {skv}  중성면 R−B {rb}  "
           f"날아감 {(mx >= 254).mean()*100:4.2f}%")
 
 

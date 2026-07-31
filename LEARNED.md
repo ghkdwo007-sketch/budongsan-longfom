@@ -63,7 +63,32 @@ python engine/sub_diff.py "<프로젝트.prproj>" "output/<base>_cut.srt"
 - **캡션은 프리미어 API 로 못 읽는다** — MCP `read_sequence_captions` 는 항상 `trackCount:0`.
   `engine/prproj_captions.py` 가 `.prproj`(gzip XML)를 직접 판다.
 
-## 4. 색보정 — **고정값은 없다**
+## 4. 색보정 — **고정값은 없다** (확정 2026-07-31)
+
+**프리셋 파일** — 전부 `profiles/budongsan-longfom/` 안에 있다. 맥에서 드라이브만 꽂으면 된다.
+
+| 파일 | 내용 |
+|---|---|
+| `cam_presets.json` | **캠별 확정 색보정값** (cam01/cam02) |
+| `tone_reference.json` | 도착점 — 다른 회차는 이 수치로 수렴시킨다 |
+| `config.json` | 컷·자막 설정 |
+| `glossary.txt` | 자막 용어집 |
+
+```bash
+python engine/eye_grade.py "<원본.MP4>" --at 300 -o out.jpg              # 1캠
+python engine/match_cams.py "<cam01>" "<cam02>" --ref-cam 1 --at 300 600  # 2캠 매칭
+```
+
+| | warm | tint | yellow | whites | contrast | sat | skin | strength |
+|---|---|---|---|---|---|---|---|---|
+| cam01 | **+4.0** | 0.0 | 0.0 | 0.362 | 0.08 | 1.375 | 1.35 | 0.60 |
+| cam02 | **−4.0** | +4.0 | +2.0 | 0.362 | 0.08 | 1.250 | 2.00 | 0.60 |
+
+**cam01 은 warm +4, cam02 는 −4 로 정반대다** — 캐스트가 달라서이고 그래야 같은 도착점에
+닿는다. 값을 서로 복사하지 말 것. 적용 순서는 `correct()` → `strength` 블렌드 → `yellow`.
+**캠 매칭은 피부톤이 1순위**(벽만 맞추면 얼굴이 창백하게 남는다). 프레이밍이 다르면 `p90` 은 뺀다.
+
+
 
 > 비블: "색보정에 고정값 같은 건 존재하지 않아. 모든 컷은 색상이 다 다르기 때문에 고정 값으로
 > 보정해버리면 일관적인 색이 절대 나올 수가 없어. 니가 보고 인간의 눈으로 봤을 때 가장 화사하고

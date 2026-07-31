@@ -62,6 +62,32 @@ def knee(x, t=0.80):
     return np.where(x > t, t + (1 - t) * np.tanh((x - t) / (1 - t)), x)
 
 
+def skin_stats(img):
+    """피부 영역의 평균 R·G·B 와 채도. **캠 매칭의 1순위 지표다.**
+
+    벽만 맞추면 얼굴이 창백한 채로 남는다(실측) — 사람 얼굴이 화면의 중심이라
+    피부가 안 맞으면 컷이 바뀔 때 바로 눈에 띈다.
+    """
+    x = img.astype(np.float32) / 255.0
+    mx, mn = x.max(2), x.min(2)
+    d = mx - mn
+    h = np.zeros_like(mx)
+    r, g, b = x[..., 0], x[..., 1], x[..., 2]
+    nz = d > 1e-6
+    i = (mx == r) & nz; h[i] = ((g - b)[i] / d[i]) % 6
+    i = (mx == g) & nz; h[i] = (b - r)[i] / d[i] + 2
+    i = (mx == b) & nz; h[i] = (r - g)[i] / d[i] + 4
+    h *= 60
+    sat = np.where(mx > 0, d / np.maximum(mx, 1e-6), 0)
+    m = ((h < 50) | (h > 345)) & (sat > 0.10) & (sat < 0.65) & (mx > 0.25)
+    if m.sum() < 200:
+        return None
+    f = img.astype(np.float32)
+    return dict(R=float(f[..., 0][m].mean()), G=float(f[..., 1][m].mean()),
+                B=float(f[..., 2][m].mean()), sat=float(sat[m].mean() * 100),
+                lum=float((f @ LW)[m].mean()), area=float(m.mean() * 100))
+
+
 def diagnose(img):
     """원본을 재서 무엇이 문제인지 숫자로 잡는다."""
     f = img.astype(np.float32)
@@ -77,7 +103,12 @@ def diagnose(img):
 
 
 def correct(img, wb=1.0, whites=0.0, blacks=0.0, contrast=0.0,
-            sat=1.0, skin=1.0, warm=0.0):
+            sat=1.0, skin=1.0, warm=0.0, tint=0.0):
+    """warm = 주황↔파랑 (R/B 축) · tint = 마젠타↔초록 (G 축).
+
+    **tint 가 없으면 창백함을 못 잡는다.** 피부가 핏기 없어 보이는 건 대개 G 가 높은
+    것인데, warm 은 R 과 B 만 움직여서 손을 못 댄다(캠 매칭 실측: 피부 G 가 14.7 어긋남).
+    """
     x = img.astype(np.float32) / 255.0
     if wb:                                   # ① 캐스트 제거 (벽 기준)
         m = neutral_mask(img)
@@ -86,6 +117,10 @@ def correct(img, wb=1.0, whites=0.0, blacks=0.0, contrast=0.0,
     if warm:
         x[..., 0] *= 1 + warm * 0.01
         x[..., 2] *= 1 - warm * 0.01
+    if tint:                                 # + = 마젠타(초록 빼기), − = 초록
+        x[..., 1] *= 1 - tint * 0.01
+        x[..., 0] *= 1 + tint * 0.004
+        x[..., 2] *= 1 + tint * 0.004
     if whites:                               # ② 밝은 쪽만 (하이라이트는 니로 보호)
         w = np.clip((x @ LW - 0.30) / 0.70, 0, 1)[..., None] ** 0.7
         x = x * (1 + whites * w)
@@ -134,6 +169,37 @@ def auto(img, strength=STRENGTH):
                    sat=sat, skin=1.30, warm=2.5)
     blend = img.astype(np.float32) * (1 - strength) + full.astype(np.float32) * strength
     return np.clip(blend, 0, 255).astype(np.uint8), dict(whites=whites, sat=sat)
+
+
+def yellow_shift(img, amt):
+    """붉은 기를 빼고 노랑 쪽으로. R 내리고 G 올리고 B 내린다.
+
+    캠 매칭 마무리에서 쓴다 — warm(R/B 축)·tint(G 축)만으로는 '마젠타가 높다'는
+    지적을 못 잡는 경우가 있어서, 세 채널을 한 방향으로 같이 미는 축을 따로 뒀다.
+    **블렌드 뒤에 적용한다**(순서가 바뀌면 결과가 달라진다).
+    """
+    if not amt:
+        return img
+    f = img.astype(np.float32) / 255.0
+    f[..., 0] *= 1 - amt * 0.004
+    f[..., 1] *= 1 + amt * 0.006
+    f[..., 2] *= 1 - amt * 0.010
+    return (np.clip(f, 0, 1) * 255).astype(np.uint8)
+
+
+def grade_cam(img, p):
+    """캠 프리셋 한 벌을 그대로 적용한다 — 보정 → 강도 블렌드 → 노랑 마무리.
+
+    `profiles/<프로파일>/cam_presets.json` 의 값을 그대로 받는다.
+    **순서를 바꾸지 말 것.**
+    """
+    full = correct(img, wb=p.get("wb", 1.0), whites=p.get("whites", 0.0),
+                   blacks=p.get("blacks", 0.0), contrast=p.get("contrast", 0.0),
+                   sat=p.get("sat", 1.0), skin=p.get("skin", 1.0),
+                   warm=p.get("warm", 0.0), tint=p.get("tint", 0.0))
+    s = p.get("strength", STRENGTH)
+    out = np.clip(img.astype(np.float32) * (1 - s) + full.astype(np.float32) * s, 0, 255)
+    return yellow_shift(out.astype(np.uint8), p.get("yellow", 0.0))
 
 
 def report(img, tag):

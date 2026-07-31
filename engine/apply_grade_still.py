@@ -56,7 +56,15 @@ def zone_weights(luma):
     return sh, 1.0 - sh - hi, hi
 
 
-def grade(img, tint="warm", luma_scale=0.18, sat_mul=SAT_MUL, tint_scale=0.35):
+def grade(img, tint="warm", luma_scale=0.18, sat_mul=SAT_MUL, tint_scale=0.35,
+          shadow_luma=None):
+    """shadow_luma 로 섀도우 휠의 루마를 덮어쓴다(기본 0.032 = 읽어낸 값).
+
+    **블랙을 푸는 건 나중에 들어올리는 게 아니라 여기서 덜 누르는 것이다.**
+    0.032 는 바닥이라 검은 옷·머리카락이 순검정으로 뭉갠다(어두운영역 99.3% 가 <16).
+    사후 토(toe) 리프트는 레벨만 올리고 결은 못 살린다 — 실측 결(σ):
+    원본 7.70 / 눌린 상태 2.49 / 토 리프트 +8 → 1.77 / 여기서 0.50 으로 올리면 **9.45**.
+    """
     x = img.astype(np.float32) / 255.0
     luma = x @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
     sh, mid, hi = (w[..., None] for w in zone_weights(luma))
@@ -64,7 +72,9 @@ def grade(img, tint="warm", luma_scale=0.18, sat_mul=SAT_MUL, tint_scale=0.35):
     # ① 휠 루마 — 0.5 를 중립으로 보고 편차를 밝기 오프셋으로
     off = np.zeros_like(x)
     tint_vec = np.zeros_like(x)
-    for (name, ang, lum, sat), w in zip(WHEELS, (sh, mid, hi)):
+    for i, ((name, ang, lum, sat), w) in enumerate(zip(WHEELS, (sh, mid, hi))):
+        if i == 0 and shadow_luma is not None:
+            lum = shadow_luma
         off += w * ((lum - 0.5) * 2.0 * luma_scale)
         tint_vec += w * (TINTS[tint](ang) * sat * tint_scale)
     x = x + off + tint_vec
@@ -114,9 +124,15 @@ def stats(img, label):
 
 
 # ── 확정 레시피 (2026-07-30, 비블이 스틸 테스트로 고른 값) ──────────────
-# 읽어낸 값에서 출발해 피드백 4회를 반영한 최종본. 자세한 근거는 프로파일 README.
+# 읽어낸 값에서 출발해 피드백을 반영한 최종본. 자세한 근거는 프로파일 README.
+#
+# shadow_luma 는 읽어낸 값(0.032)이 아니라 **0.50** 이다 — 0.032 로 가면 검은 옷·머리가
+# 순검정으로 뭉갠다(어두운영역의 99.3% 가 <16). 5단계를 보여주고 비블이 0.50 을 골랐다.
+# skin_points 도 40 → **80**. 260630 처럼 조명이 다른 회차에서는 +40 이 원본보다도
+# 낮게 나온다(29.76% vs 원본 31.63%) — 앞단의 전체 채도 ×0.98 을 겨우 상쇄하는 수준이라
+# 피부가 안 산다. 값이 아니라 방식을 재사용한다는 게 여기서 실제로 드러났다.
 RECIPE = dict(tint="warm", luma_scale=0.18, tint_scale=0.27,
-              sat_ui=98, whites=0.12, blue_points=5, skin_points=40)
+              sat_ui=98, whites=0.12, shadow_luma=0.50, blue_points=5, skin_points=80)
 
 
 def knee(x, t=0.85):
@@ -180,7 +196,8 @@ def full_grade(src, **kw):
     """확정 레시피 전체. **순서가 중요하다** — 중성화가 먼저, 스타일은 그 위에."""
     r = dict(RECIPE, **kw)
     x = grade(src, tint=r["tint"], luma_scale=r["luma_scale"],
-              sat_mul=r["sat_ui"] / 100.0, tint_scale=r["tint_scale"])
+              sat_mul=r["sat_ui"] / 100.0, tint_scale=r["tint_scale"],
+              shadow_luma=r["shadow_luma"])
     x = whitebalance(x)                              # ③ 캐스트 제거
     x = whitebalance(lift_whites(x, r["whites"]))    # ④ 밝기 (올린 뒤 다시 중성화)
     x = blue_tint(x, r["blue_points"])               # ⑥ 아주 살짝 쿨하게
@@ -205,15 +222,15 @@ if __name__ == "__main__":
     ap.add_argument("src")
     ap.add_argument("-o", "--out", default="graded.png")
     ap.add_argument("--compare", action="store_true", help="단계별 비교 시트도 저장")
-    for k, v in (("luma-scale", 0.18), ("tint-scale", 0.27), ("whites", 0.12),
-                 ("sat-ui", 98.0), ("blue-points", 5.0), ("skin-points", 40.0)):
-        ap.add_argument(f"--{k}", type=float, default=v)
+    # **기본값은 RECIPE 에서 끌어온다.** 여기 숫자를 따로 적으면 확정값과 갈라져서,
+    # RECIPE 를 고쳐도 CLI 는 옛 값으로 도는 사고가 난다(실제로 한 번 겪음).
+    numeric = {k: v for k, v in RECIPE.items() if isinstance(v, (int, float))}
+    for k, v in numeric.items():
+        ap.add_argument("--" + k.replace("_", "-"), type=float, default=v)
     a = ap.parse_args()
 
     src = np.array(Image.open(a.src).convert("RGB"))
-    out = full_grade(src, luma_scale=a.luma_scale, tint_scale=a.tint_scale,
-                     whites=a.whites, sat_ui=a.sat_ui,
-                     blue_points=a.blue_points, skin_points=a.skin_points)
+    out = full_grade(src, **{k: getattr(a, k) for k in numeric})
     print(f"원본 {src.shape[1]}x{src.shape[0]}\n")
     report(src, "원본(미보정)")
     report(out, "확정 레시피")

@@ -123,8 +123,10 @@ def main():
 
     # ── 6) 검증 ──────────────────────────────────────────────────
     step(6, "검증")
+    # 프로파일을 넘겨야 자막 규칙(문장부호·길이)을 같은 기준으로 본다
     run([PY, os.path.join(HERE, "verify_episode.py"), a.cam1] +
-        (["--cam2"] if a.cam2 else []))
+        (["--cam2"] if a.cam2 else []) +
+        (["--profile", a.profile] if a.profile else []))
 
     # ── 7) 카테고리 + 하이라이트 (구간 JSON 이 있을 때만) ────────
     # 구간 판단은 전사본을 읽고 사람(또는 Claude)이 해야 하는 일이라 자동화하지 않는다.

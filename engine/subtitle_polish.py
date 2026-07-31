@@ -33,8 +33,13 @@ except (AttributeError, OSError):
 # 환경변수 SUB_MAX_CHARS 로 덮어쓸 수 있음.
 MAX_CHARS_LINE = int(os.environ.get("SUB_MAX_CHARS", 25))
 
-# 온점(.)·쉼표(,) 제거 — 비블 자막 스타일. ? ! 는 남긴다. 환경변수/프로파일로 켠다.
-STRIP_PUNCT = os.environ.get("SUB_STRIP_PUNCT", "0") not in ("0", "", "false", "False")
+# 문장부호 정리 모드. ? ! 와 ... … 는 어느 모드에서도 남는다.
+#   "all"   온점+쉼표 제거   "comma" 쉼표만 제거(온점 유지)   "none"/0 그대로 둠
+# 예전에는 True/False 뿐이었다 — 비블 완성본을 재보니 온점은 살리고 쉼표만 빼야 맞았다.
+_SP = os.environ.get("SUB_STRIP_PUNCT", "0")
+STRIP_MODE = ("none" if _SP in ("0", "", "false", "False")
+              else "comma" if _SP in ("comma", "쉼표")
+              else "all")
 MAX_CPS        = 9.0   # 초당 최대 글자수(읽기속도). 초과 시 확장
 MIN_DUR        = 0.7   # 자막 최소 표시시간(초)
 FILL_GAPS      = True  # 자막 사이 빈칸 제거 — 각 자막 끝을 다음 자막 시작까지 연장(연속 표시)
@@ -227,17 +232,25 @@ def fill_gaps(cues):
     return cues
 
 
-def strip_punct(text):
-    """자막용 문장부호 정리 — **단독 온점(.)과 쉼표(,)만** 제거.
+def strip_punct(text, mode="all"):
+    """자막용 문장부호 정리.
+
+    mode="all"   단독 온점(.)과 쉼표(,)를 모두 제거 (예전 기본값)
+    mode="comma" **쉼표만** 제거하고 온점은 남긴다 ← 부동산롱폼 기본
 
     남기는 것:
       ? !      어조를 담고 있다
       ... …    말 끄는 표현이라 의미가 있다 (온점 계열이지만 유지)
       1.2%     숫자 사이의 점·쉼표는 값의 일부 (8,500 도 마찬가지)
+
+    **왜 쉼표만 빼는가** — 비블 완성본 실측: 온점 225 · 쉼표 65(줄당 0.09).
+    whisper 원문은 줄당 0.74 로 8배 넘게 찍고, 줄 끝을 쉼표로 맺는 비율도
+    24.1% vs 1.6% 다. 온점은 살리고 쉼표만 걷어내면 비블 쪽에 붙는다.
     """
+    chars = "[.,]" if mode == "all" else "[,]"
     t = text.replace("…", "\x01")                          # 말줄임표 보호
     t = re.sub(r"\.{2,}", lambda m: "\x02" * len(m.group(0)), t)
-    t = re.sub(r"(?<!\d)[.,]|[.,](?!\d)", "", t)           # 숫자 사이가 아닌 단독 . , 제거
+    t = re.sub(rf"(?<!\d){chars}|{chars}(?!\d)", "", t)    # 숫자 사이가 아닌 단독 부호 제거
     t = re.sub(r"\x02+", lambda m: "." * len(m.group(0)), t)
     t = t.replace("\x01", "…")
     t = re.sub(r"[ \t]{2,}", " ", t)
@@ -254,8 +267,8 @@ def polish(cues):
     cues = sanitize(cues)
     if FILL_GAPS:                              # 빈칸 없이 연속 표시
         cues = fill_gaps(cues)
-    if STRIP_PUNCT:                            # 마지막에 — 앞 단계들이 문장부호로 경계를 판단하므로
-        cues = [(s, e, strip_punct(t)) for s, e, t in cues]
+    if STRIP_MODE != "none":                   # 마지막에 — 앞 단계들이 문장부호로 경계를 판단하므로
+        cues = [(s, e, strip_punct(t, STRIP_MODE)) for s, e, t in cues]
         cues = [(s, e, t) for s, e, t in cues if t]
     return cues
 

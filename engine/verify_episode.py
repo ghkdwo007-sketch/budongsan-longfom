@@ -32,6 +32,29 @@ FPS = 30000 / 1001
 TCDIV = 1
 FAIL = []
 
+# 자막 규칙은 프로파일에서 읽는다(환경변수가 있으면 그게 우선).
+# `--profile` 없이 불려도 되도록, 없으면 엔진 기본값을 쓴다.
+def _sub_cfg(profile=None):
+    """(모드, 최대글자수). 모드는 subtitle_polish 와 같은 규칙으로 읽는다.
+
+    "all" 온점+쉼표 제거 / "comma" 쉼표만 / "none" 그대로.
+    예전 config 의 true 는 "all" 로 읽는다.
+    """
+    import config
+    cfg = config.load(project_dir=PROJ, profile=profile)
+    raw = os.environ.get("SUB_STRIP_PUNCT", cfg.get("SUB_STRIP_PUNCT", True))
+    if raw in (False, "0", "", "false", "False", None):
+        mode = "none"
+    elif raw in ("comma", "쉼표"):
+        mode = "comma"
+    else:
+        mode = "all"
+    maxc = int(os.environ.get("SUB_MAX_CHARS", cfg.get("SUB_MAX_CHARS", 25)))
+    return mode, maxc
+
+
+STRIP_MODE, MAX_CHARS = "all", 25   # main() 에서 프로파일 값으로 덮어쓴다
+
 
 def check(ok, label, detail=""):
     print(f"  {'OK  ' if ok else 'FAIL'} {label}" + (f" — {detail}" if detail else ""))
@@ -58,10 +81,15 @@ def main():
     master = sys.argv[1]
     base = os.path.splitext(os.path.basename(master))[0]
     has_cam2 = "--cam2" in sys.argv
+    profile = None
+    if "--profile" in sys.argv:
+        i = sys.argv.index("--profile")
+        profile = sys.argv[i + 1] if i + 1 < len(sys.argv) else None
     o = os.path.join(PROJ, "output")
     P = lambda s: os.path.join(o, base + s)
 
-    global FPS, TCDIV
+    global FPS, TCDIV, STRIP_MODE, MAX_CHARS
+    STRIP_MODE, MAX_CHARS = _sub_cfg(profile)
     if os.path.exists(master):
         FPS = probe_media(master)["fps"]
         # EDL 은 30프레임 TC 로 기록된다(59.94p 는 소스 2프레임 = TC 1프레임).
@@ -78,8 +106,9 @@ def main():
     print("\n── 자막")
     c = cues(P("_cut.srt"))
     L = [len(t) for _s, _e, t in c]
-    maxc = int(os.environ.get("SUB_MAX_CHARS", 25))
-    check(max(L) <= maxc, f"한 줄 {maxc}자 이하", f"최장 {max(L)}자 · 초과 {sum(1 for x in L if x > maxc)}개")
+    maxc = MAX_CHARS
+    check(max(L) <= maxc, f"한 줄 {maxc}자 이하",
+          f"최장 {max(L)}자 · 중앙 {sorted(L)[len(L)//2]}자 · 초과 {sum(1 for x in L if x > maxc)}개")
     check(all("\n" not in t for _s, _e, t in c), "모두 한 줄")
     check(all(e > s for s, e, _ in c), "시작 < 끝")
     check(all(c[i][0] >= c[i-1][1] - 1e-6 for i in range(1, len(c))), "겹침 없음")
@@ -105,11 +134,22 @@ def main():
     print(f"       (참고) 자막은 FILL_GAPS 로 다음 자막 시작까지 이어진다 → "
           f"컷 경계를 넘어가는 건 의도된 동작")
 
+    # 문장부호는 **프로파일 설정을 따라간다.** 환경변수만 보면 프로파일에서 끈 걸 못 읽어
+    # 멀쩡한 산출물을 FAIL 로 잡는다(실측 — 260630 회차가 이걸로 막혔다).
     flat = " ".join(t for _s, _e, t in c)
     noell = re.sub(r"\.{2,}|…", "", flat)
-    if os.environ.get("SUB_STRIP_PUNCT", "1") not in ("0", "false"):
-        check(len(re.findall(r"(?<!\d)\.(?!\d)", noell)) == 0, "단독 온점 없음")
-        check(len(re.findall(r"(?<!\d),(?!\d)", noell)) == 0, "단독 쉼표 없음")
+    dots = len(re.findall(r"(?<!\d)\.(?!\d)", noell))
+    commas = len(re.findall(r"(?<!\d),(?!\d)", noell))
+    if STRIP_MODE == "all":
+        check(dots == 0, "단독 온점 없음")
+        check(commas == 0, "단독 쉼표 없음")
+    elif STRIP_MODE == "comma":
+        check(commas == 0, "단독 쉼표 없음")
+        print(f"       (참고) 온점 유지 — {dots}개 · 줄당 {dots/max(1,len(c)):.2f} "
+              f"(비블 완성본 0.30)")
+    else:
+        print(f"       (참고) 문장부호 그대로 — 온점 {dots}개 · 쉼표 {commas}개 "
+              f"(비블 완성본은 온점 225·쉼표 65)")
 
     print("\n── 오디오")
     wav = P("_cut_audio_flat.wav")

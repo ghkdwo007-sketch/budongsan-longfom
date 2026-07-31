@@ -415,8 +415,10 @@ def main():
     CFG = CONFIG.load(preset, project_dir=proj, profile=profile)
     if CFG.get("SUB_MAX_CHARS"):                # 자막 설정을 하위 모듈에 전달
         os.environ["SUB_MAX_CHARS"] = str(CFG["SUB_MAX_CHARS"])
+    # "all" / "comma" / false — 문자열 모드를 그대로 넘긴다(예전 true 는 "all" 로 읽힌다)
     if CFG.get("SUB_STRIP_PUNCT"):
-        os.environ["SUB_STRIP_PUNCT"] = "1"
+        v = CFG["SUB_STRIP_PUNCT"]
+        os.environ["SUB_STRIP_PUNCT"] = v if isinstance(v, str) else "all"
     if audio_style:
         CFG["AUDIO_STYLE"] = audio_style
     apply_config_to_modules()

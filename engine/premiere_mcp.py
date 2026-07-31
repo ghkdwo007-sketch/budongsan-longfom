@@ -1,0 +1,103 @@
+"""프리미어 MCP 서버(premiere-pro)를 stdio 로 직접 호출하는 클라이언트.
+
+Claude Code 세션에 `mcp__premiere-pro__*` 툴이 안 올라와 있어도(경로 오류·재시작 전 등)
+이걸로 바로 프리미어를 읽을 수 있다. **비블 수정본을 EDL 로 재내보내지 않고
+열려 있는 프로젝트에서 직접 읽는 게 학습 루프의 표준 경로다.**
+
+전제: ① 프리미어가 실행 중 ② CEP 브리지 패널 설치
+     (`C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\cep-plugin`)
+     ③ 서버 빌드 완료 (`npm install && npm run build`)
+
+    python engine/premiere_mcp.py get_project_info
+    python engine/premiere_mcp.py get_full_sequence_info '{"sequenceId":"..."}'
+
+주요 툴 (총 281개):
+    list_sequences            시퀀스 id·이름·길이·트랙수
+    get_full_sequence_info    트랙별 클립 전체 — start/end/inPoint/outPoint (초)
+    read_sequence_captions    캡션 트랙 자막
+    list_clip_effects         클립 이펙트(Lumetri 색보정 등)
+    get_clip_properties       클립 속성
+"""
+import json
+import os
+import subprocess
+import sys
+
+SERVER = os.environ.get(
+    "PREMIERE_MCP_SERVER", r"C:\Users\USER\Adobe_Premiere_Pro_MCP\dist\index.js")
+TEMP = os.environ.get("PREMIERE_TEMP_DIR", r"C:\temp\premiere-mcp-bridge")
+
+
+class Premiere:
+    """MCP 서버를 자식 프로세스로 띄우고 JSON-RPC 로 대화한다."""
+
+    def __init__(self):
+        self.p = subprocess.Popen(
+            ["node", SERVER],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, encoding="utf-8", bufsize=1,
+            env=dict(os.environ, PREMIERE_TEMP_DIR=TEMP),
+        )
+        self._id = 0
+        self._rpc("initialize", {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "premiere_mcp.py", "version": "1"},
+        })
+        self._send({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
+
+    def _send(self, obj):
+        self.p.stdin.write(json.dumps(obj) + "\n")
+        self.p.stdin.flush()
+
+    def _rpc(self, method, params):
+        self._id += 1
+        self._send({"jsonrpc": "2.0", "id": self._id, "method": method, "params": params})
+        while True:
+            line = self.p.stdout.readline()
+            if not line:
+                raise RuntimeError(
+                    "MCP 서버가 응답 없이 종료됐다 — 서버 빌드(dist/index.js)를 확인할 것")
+            msg = json.loads(line)
+            if msg.get("id") == self._id:
+                return msg
+
+    def call(self, tool, **args):
+        """툴 호출. 결과가 JSON 이면 dict, 아니면 {'_text': ...}"""
+        msg = self._rpc("tools/call", {"name": tool, "arguments": args})
+        if "error" in msg:
+            return {"_error": msg["error"]}
+        result = msg.get("result", {})
+        raw = "\n".join(c.get("text", "") for c in result.get("content", [])
+                        if c.get("type") == "text")
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return {"_text": raw, "_isError": result.get("isError")}
+
+    def tools(self):
+        return [t["name"] for t in self._rpc("tools/list", {})["result"]["tools"]]
+
+    def close(self):
+        self.p.kill()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def clips(seq_info, track_type="videoTracks", index=0):
+    """get_full_sequence_info 결과에서 한 트랙의 클립 리스트를 꺼낸다."""
+    return seq_info["data"][track_type][index]["clips"]
+
+
+if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(0)
+    args = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+    with Premiere() as pr:
+        print(json.dumps(pr.call(sys.argv[1], **args), ensure_ascii=False, indent=1))

@@ -50,6 +50,7 @@
 | 2026-07-30 | **컷 경계 무음 가드 `cut_gate.py`** — 이어붙는 두 지점의 실제 RMS 를 재서 경계 이동, 안 되면 제거 포기(최종 패스에선 두 컷 합침) · 판정은 프레임 격자에서 · `MIN_REMOVE` 추가 · 부동산롱폼 프로파일 `NOISE_DB -50`·`PAD_LEAD 0.30`·`MIN_SILENCE 0.70` | cut_gate(신규), auto_cut, silence_cut, config, 프로파일 | **말이 채 끝나기 전에 끊겨 다음 컷 연결이 부자연스러웠다**(비블). whisper 단어 타임스탬프가 ±100~200ms 흔들려 '전사상 빈틈'이 실제로는 발화 중 — WORD_SNAP 은 단어를 '엄격히 관통'할 때만 고쳐서 못 잡는다. 실측 접합부 '말 중' 비율 54.8%→0.7%, 최대 -4.1dB→-32.5dB (제거율 12.8%→7.5%는 의도한 트레이드오프) |
 | 2026-07-30 | `silence_cut.run()`·`auto_cut` volumedetect 에 `encoding="utf-8"` 명시 | silence_cut, auto_cut | 한글 경로에서 ffmpeg 의 UTF-8 출력을 cp949 로 디코딩해 리더 스레드가 죽고 stderr 가 None → silencedetect 파싱이 `NoneType` 으로 터졌다 |
 | 2026-07-30 | 외장 SSD(exFAT) 맥↔윈도우 왕복 세팅 — `.venv-win` 생성 · **전사 모델 캐시를 프로젝트 `.hf-cache/` 로**(`HF_HOME`) · git `safe.directory` 는 OS별 등록 필요(홈에 저장돼 드라이브를 안 따라감) · 드라이브문자/안전제거 문서화 | SETUP.md, make_subtitles, setup_check, .gitignore | 프로젝트를 `E:\budongsan-longfom\PremierePro-edit`(T7 2TB)로 옮겨 두 OS에서 번갈아 작업. ① `edit.sh` 가 윈도우에서 `.venv-win` 을 찾는데 없어서 깨져 있었다 ② 모델 기본 캐시가 `~/.cache` 라 OS 마다 1.6GB 재다운로드였다 |
+| 2026-07-30 | **프리미어 MCP 로 수정본 직접 읽기** — `premiere_mcp.py`(stdio JSON-RPC 클라이언트) + `mcp_cut_diff.py`(3자 컷 비교) | engine(신규 2), 프로파일 README, BASELINE.md | 비블 완성본과 대조하려면 렌더+전사 또는 EDL 재내보내기가 필요했는데, 프리미어가 열려 있으면 MCP 로 클립별 소스 in/out 을 바로 읽을 수 있다. **실측 결과 '과잉 제거' 가정이 틀렸다** — 우리가 버린 3:52 중 비블이 되살린 건 3.1초뿐이고, 수정은 거의 전부 내용 컷(285컷 중 134컷 삭제, 26:14→13:50)이었다. 컷 경계 델타 중앙값은 0.000s = 패딩 값은 그대로 두면 된다 |
 
 ## [중요] Premiere Pro 26(2026) 호환
 

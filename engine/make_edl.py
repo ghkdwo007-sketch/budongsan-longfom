@@ -126,10 +126,14 @@ def build(title, keeps, tracks, path_note):
     매핑기준프레임에는 싱크 오프셋이 이미 반영돼 있을 수 있다. 따라서 유효 범위는
     반드시 '미디어 자체의 TC 구간' [tc0, tc0+length] 로 판정해야 한다.
 
-    범위를 벗어나는 이벤트(그 카메라가 아직/이미 안 찍고 있던 구간)는 **버리지 않고**
-    소스 구간만 유효 범위 안으로 밀어 넣는다(clamp). 컷 개수·컷 지점·러닝타임이
-    카메라마다 완전히 동일해야 레이어를 겹쳐 교차편집할 수 있기 때문이다.
-    클램프된 이벤트는 그 클립만 내용이 최대 1초 어긋나므로 호출부에서 보고한다.
+    범위를 벗어나는 이벤트(그 카메라가 아직/이미 안 찍고 있던 구간)는 **버리지 않는다** —
+    컷 개수·러닝타임이 카메라마다 같아야 레이어를 겹쳐 교차편집할 수 있기 때문이다.
+
+    **다만 소스를 통째로 밀지 않는다.** 예전엔 길이를 지키려고 없는 구간만큼 소스를
+    밀어 넣었는데, 그러면 그 클립이 **엉뚱한 시각의 내용**으로 채워져 립싱크가 어긋난다
+    (실측: cam02 1번 컷이 1.19초 어긋나 오프닝 32초가 통째로 깨졌다 — 비블이 잡았다).
+    카메라가 안 돌던 구간은 그냥 그 클립을 **짧게** 만든다(머리를 자른다). 레코드 시작이
+    그만큼 늦어질 뿐, 뒤따르는 컷의 레코드 TC 는 그대로다.
     """
     fcm = "DROP FRAME" if tc_rate()[1] else "NON-DROP FRAME"
     out = [f"TITLE: {title}", f"FCM: {fcm}", ""]
@@ -143,17 +147,22 @@ def build(title, keeps, tracks, path_note):
         lines = []
         for ch, rl, src_base, tc0, src_len in tracks:
             s_in, s_out = src_base + a, src_base + b
+            rr_in, rr_out = r_in, r_out
             if src_len is not None:
                 lo, hi = tc0, tc0 + src_len
-                if s_in < lo:                      # 아직 녹화 전 → 뒤로 민다
-                    clamped.append((n, rl.strip(), lo - s_in))
-                    s_in, s_out = lo, lo + dur
-                elif s_out > hi:                   # 이미 녹화 종료 → 앞으로 당긴다
-                    clamped.append((n, rl.strip(), s_out - hi))
-                    s_out, s_in = hi, hi - dur
+                if s_in < lo:                      # 아직 녹화 전 → 머리를 자른다
+                    cut = lo - s_in
+                    clamped.append((n, rl.strip(), cut))
+                    s_in, rr_in = lo, r_in + cut
+                if s_out > hi:                     # 이미 녹화 종료 → 꼬리를 자른다
+                    cut = s_out - hi
+                    clamped.append((n, rl.strip(), cut))
+                    s_out, rr_out = hi, r_out - cut
+                if s_out <= s_in:                  # 그 카메라에 아예 없는 구간
+                    continue
             lines.append(f"{{n}}  {reel(rl)} {ch:<5} C        "
                          f"{frames_to_df(s_in)} {frames_to_df(s_out)} "
-                         f"{frames_to_df(r_in)} {frames_to_df(r_out)}")
+                         f"{frames_to_df(rr_in)} {frames_to_df(rr_out)}")
         out += [l.replace("{n}", f"{n:03d}") for l in lines]
         out.append(f"* FROM CLIP NAME: {path_note}")
         out.append("")
@@ -260,8 +269,9 @@ def main():
     for p, n, cl in written:
         print(f"  생성: {os.path.basename(p)}  ({n}이벤트)")
         for ev, rl, d in cl:
-            print(f"      [클램프] 이벤트 {ev:03d} {rl}: 소스가 {d}프레임({d/FPS:.2f}초) 부족 "
-                  f"→ 그 클립만 내용이 그만큼 밀림 (컷 지점·길이는 동일)")
+            print(f"      [클램프] 이벤트 {ev:03d} {rl}: 그 카메라가 안 돌던 {d}프레임"
+                  f"({d/FPS:.2f}초) 만큼 클립을 짧게 만든다 "
+                  f"(내용은 안 밀린다 — 그 구간은 다른 캠으로 덮는다)")
     print("\n프리미어:")
     print("  1) 각 .edl 을 가져오기 → 오프라인 릴에 파일 연결")
     print("  2) cam02 시퀀스 전체 복사 → cam01 시퀀스의 V2 에 00:00:00:00 기준으로 붙여넣기")

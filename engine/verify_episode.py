@@ -190,9 +190,11 @@ def main():
         # 같은 기준으로 접어 비교하려면 기대값에도 같은 클램프를 걸어야 한다.
         mlen = int(round(probe_media(master)["duration"] * FPS / TCDIV)) if os.path.exists(master) else None
         def clamp(a, b):
+            # 2026-08-01: 클램프가 '소스를 민다'에서 '클립을 짧게 만든다'로 바뀌었다.
+            # 소스 in 은 그대로 두고 out 만 미디어 끝에서 끊는다(레코드도 그만큼 짧아진다).
             if mlen is None or b <= mlen:
                 return a, b
-            return a - (b - mlen), mlen          # 길이는 유지한 채 뒤로만 당긴다
+            return a, mlen
         keeps_tc = [clamp(a // TCDIV, b // TCDIV) for a, b in keeps_snapped]
         off = [i + 1 for i, ((si, so, _a, _b), k) in enumerate(zip(r1, keeps_tc))
                if (si, so) != k]
@@ -218,8 +220,21 @@ def main():
         if os.path.exists(e2) and os.path.exists(e1):
             r2 = rows(e2)
             check(len(r2) == len(r1), "cam02 이벤트 수 = cam01", f"{len(r2)} vs {len(r1)}")
-            same = all((x[2], x[3]) == (y[2], y[3]) for x, y in zip(r1, r2))
-            check(same, "두 캠의 레코드 TC 완전 일치 (= 레이어 겹침 가능)")
+            # 캠마다 안 돌던 구간은 그 클립이 짧아진다(머리·꼬리를 자른다) — cam01 도 마찬가지라
+            # 한쪽을 기준으로 삼으면 안 된다. **컷의 이상적 레코드 구간**을 기준으로 둘 다 본다.
+            slots, acc = [], 0
+            for a, b in keeps_snapped:
+                slots.append((acc, acc + (b - a) // TCDIV)); acc = slots[-1][1]
+            out_of = [i + 1 for i, (lo, hi) in enumerate(slots)
+                      for ev in (r1[i], r2[i])
+                      if not (lo <= ev[2] < ev[3] <= hi)]
+            check(not out_of, "두 캠 레코드가 같은 컷 구간 안에 있다 (= 레이어 겹침 가능)",
+                  "" if not out_of else f"이벤트 {sorted(set(out_of))} 벗어남")
+            trimmed = [i + 1 for i, (x, y) in enumerate(zip(r1, r2))
+                       if (x[2], x[3]) != (y[2], y[3])]
+            if trimmed:
+                print(f"       (참고) cam02 가 짧아진 이벤트 {trimmed} "
+                      f"— 그 카메라가 안 돌던 구간이라 정상. 그 자리는 cam01 이 보인다")
 
     print("\n" + ("전부 통과" if not FAIL else f"실패 {len(FAIL)}건: " + ", ".join(FAIL)))
     sys.exit(1 if FAIL else 0)

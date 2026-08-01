@@ -169,8 +169,10 @@ git clone 으로 코드만 받은 환경에서는 이 비교가 안 됩니다 �
 **MCP 서버는 드라이브 밖에 있습니다** — 새 PC 에서 한 번 설치해야 합니다.
 
 ```bash
-git clone <Adobe_Premiere_Pro_MCP 리포지토리>
+git clone https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP.git
 cd Adobe_Premiere_Pro_MCP && npm install && npm run build   # dist/index.js 생성
+# 맥은 `npm run setup:mac` 한 방도 된다. 단 그 스크립트는 Claude Desktop 설정까지
+# 건드리는데 우리는 안 쓴다 — 필요한 건 build + CEP 패널 + PlayerDebugMode 뿐이다.
 ```
 
 `engine/premiere_mcp.py` 가 서버를 **환경변수 → `~/.claude.json` → 흔한 폴더** 순으로 자동
@@ -182,6 +184,21 @@ set PREMIERE_MCP_SERVER=C:\...\Adobe_Premiere_Pro_MCP\dist\index.js
 # 맥
 export PREMIERE_MCP_SERVER=/.../Adobe_Premiere_Pro_MCP/dist/index.js
 ```
+
+**맥 설치 (2026-08-01 실측)** — 설치 스크립트를 통째로 돌리는 대신 필요한 것만:
+
+```bash
+cd ~/Adobe_Premiere_Pro_MCP && npm install && npm run build
+defaults write com.adobe.CSXS.12 PlayerDebugMode 1   # 11, 10 도 같이
+cp -R cep-plugin ~/Library/Application\ Support/Adobe/CEP/extensions/MCPBridgeCEP
+```
+
+`PlayerDebugMode` 는 **서명 안 된 CEP 확장을 허용**하는 어도비 설정이다 — 이게 없으면
+패널이 목록에 안 뜬다. 어도비 앱 한정이고 OS 보안 설정은 아니다.
+
+**패널의 Temp Directory 는 맥에서 `/tmp/...` 가 아니다.** 서버가 `$TMPDIR` 아래를 본다
+(`/var/folders/.../T/premiere-mcp-bridge`). 서버 에러 메시지에 정확한 경로가 찍히므로
+그걸 그대로 패널에 넣는다. `PREMIERE_TEMP_DIR` 로 바꿔도 된다.
 
 쓰기 전에 **프리미어를 열고 CEP 브리지 패널에서 Start Bridge** 를 눌러야 합니다.
 패널의 Temp Directory 가 `PREMIERE_TEMP_DIR`(기본 `C:\temp\premiere-mcp-bridge`)와 같아야 합니다.

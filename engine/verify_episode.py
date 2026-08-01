@@ -99,7 +99,10 @@ def main():
 
     print("── 컷 / 타임라인")
     keeps = parse_keeps(P("_cut.xml"))
-    total_f = sum(b - a for a, b in keeps)
+    # EDL·오디오는 컷 경계를 TC 격자로 스냅해서 쓴다(make_edl.snap_keeps). 길이 비교는
+    # 그쪽 기준으로 해야 한다 — 스냅 전 값과 비교하면 정상인데도 어긋난 것처럼 보인다.
+    keeps_snapped = make_edl.snap_keeps(keeps, TCDIV) if TCDIV > 1 else keeps
+    total_f = sum(b - a for a, b in keeps_snapped)
     check(len(keeps) > 0, "컷 존재", f"{len(keeps)}컷 · {total_f}프레임 ({total_f/FPS/60:.2f}분)")
     check(all(b > a for a, b in keeps), "컷 길이 양수")
 
@@ -156,8 +159,14 @@ def main():
     if os.path.exists(wav):
         with wave.open(wav) as w:
             af = w.getnframes() / w.getframerate() * FPS
-        check(abs(af - total_f) < 1.0, "플랫 오디오 길이 = 컷 총합",
-              f"{af:.1f}프레임 vs {total_f}프레임")
+        # 마지막 컷이 미디어 끝을 넘으면 make_cut_audio 가 소스 길이에서 끊는다(=클램프).
+        # 기대값에도 같은 클램프를 걸어야 한다 — 안 걸면 정상인 꼬리 잘림이 실패로 뜬다.
+        mlen_src = probe_media(master)["duration"] * FPS if os.path.exists(master) else None
+        want = total_f
+        if mlen_src is not None:
+            want = sum(min(b, mlen_src) - a for a, b in keeps_snapped if min(b, mlen_src) > a)
+        check(abs(af - want) < 2.0, "플랫 오디오 길이 = 컷 총합(클램프 반영)",
+              f"{af:.1f}프레임 vs {want:.1f}프레임")
     else:
         check(False, "플랫 오디오 존재")
 
@@ -184,13 +193,24 @@ def main():
             if mlen is None or b <= mlen:
                 return a, b
             return a - (b - mlen), mlen          # 길이는 유지한 채 뒤로만 당긴다
-        keeps_tc = [clamp(int(round(a / TCDIV)), int(round(b / TCDIV))) for a, b in keeps]
+        keeps_tc = [clamp(a // TCDIV, b // TCDIV) for a, b in keeps_snapped]
         off = [i + 1 for i, ((si, so, _a, _b), k) in enumerate(zip(r1, keeps_tc))
                if (si, so) != k]
         check(not off, "cam01 소스 in/out = XML 컷",
               "" if not off else f"이벤트 {off} 불일치")
         check(r1[0][2] == 0, "레코드 00:00:00:00 시작")
         check(all(r1[i][2] == r1[i-1][3] for i in range(1, len(r1))), "레코드 연속(갭 없음)")
+
+        # **오디오를 EDL 레코드 타임라인과 직접 비교한다.** 예전엔 오디오를 '컷 합계'와만
+        # 재서, 둘 다 반올림 전 값이라 항상 통과했다 — EDL 만 컷마다 접히며 오차가 쌓이는
+        # 걸 못 잡았다(실측 45컷에 234ms, 뒤로 갈수록 오디오가 앞서감).
+        if os.path.exists(wav):
+            edl_end = r1[-1][3]                       # 마지막 레코드 out (TC 프레임)
+            with wave.open(wav) as w:
+                a_tc = w.getnframes() / w.getframerate() * (FPS / TCDIV)
+            check(abs(a_tc - edl_end) < 1.0, "플랫 오디오 길이 = EDL 시퀀스 길이",
+                  f"오디오 {a_tc:.1f} vs EDL {edl_end} TC프레임 "
+                  f"(차이 {(a_tc-edl_end)*1001/30000*1000:+.0f}ms)")
 
     if has_cam2:
         e2 = P("_cam02_v_tc0.edl")

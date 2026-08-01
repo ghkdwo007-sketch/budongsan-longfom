@@ -64,6 +64,15 @@ def main():
     fps = probe_media(master)["fps"]
     print(f"  소스 {fps}fps 기준으로 프레임→샘플 변환")
 
+    # EDL 이 컷 경계를 TC 격자로 접으므로(59.94p → 소스 2프레임 = TC 1프레임) 오디오도
+    # **같은 격자**로 잘라야 한다. 안 그러면 EDL 쪽만 컷마다 반올림돼 그 오차가 쌓이고,
+    # 오디오가 영상보다 점점 앞서간다(실측 45컷에 234ms — 비블이 잡은 증상).
+    from make_edl import snap_keeps
+    tcdiv = 2 if round(fps) > 30 else 1
+    if tcdiv > 1:
+        keeps = snap_keeps(keeps, tcdiv)
+        print(f"  컷 경계를 소스 {tcdiv}프레임 격자로 맞춤 (EDL 과 동일)")
+
     # 샘플 단위로 직접 자른다. ffmpeg concat 디먹서의 inpoint/outpoint 는 구간마다
     # 수십 ms 씩 밀려(실측 285구간에 12.6초 초과) 컷과 안 맞는다.
     import wave

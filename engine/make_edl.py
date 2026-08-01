@@ -72,6 +72,26 @@ def frames_to_df(fr, sep=":", fps=None):
             f"{sep}{(fr // n) % 60:02d}{sep}{fr % n:02d}")
 
 
+def snap_keeps(keeps, tcdiv):
+    """컷 경계를 tcdiv 의 배수(소스 프레임)로 맞춘다. **오디오도 같은 함수를 쓴다.**
+
+    59.94p 를 29.97 TC 로 접을 때 컷마다 따로 반올림하면 컷당 최대 0.5 TC프레임씩
+    잃고 **그게 누적된다**(실측 45컷에 7프레임 = 234ms). 오디오는 소스 프레임 그대로
+    자르니 반올림을 안 해서, 뒤로 갈수록 영상보다 앞서간다 — 비블이 잡은 그 증상이다.
+
+    경계를 미리 배수로 맞춰 두면 접기가 나눗셈으로 딱 떨어져 오차가 아예 없다.
+    컷 지점이 최대 tcdiv-1 프레임(59.94p 에서 16.7ms) 움직이지만 누적되지 않는다.
+    """
+    out = []
+    for a, b in keeps:
+        a2 = int(round(a / tcdiv)) * tcdiv
+        b2 = int(round(b / tcdiv)) * tcdiv
+        if b2 <= a2:                       # 반올림으로 길이가 0 이 되면 최소 1 TC프레임 보장
+            b2 = a2 + tcdiv
+        out.append((a2, b2))
+    return out
+
+
 def source_tc(path):
     """미디어에 박힌 시작 타임코드. 없으면 00:00:00:00."""
     r = run([FFPROBE, "-v", "error", "-show_entries",
@@ -182,7 +202,7 @@ def main():
           f"({'드롭프레임' if drop else '논드롭'}"
           + (f", 소스 {tcdiv}프레임 = TC 1프레임" if tcdiv > 1 else "") + ")")
     if tcdiv > 1:                       # 프레임 값도 같은 기준으로 접는다
-        keeps = [(int(round(a / tcdiv)), int(round(b / tcdiv))) for a, b in keeps]
+        keeps = [(a // tcdiv, b // tcdiv) for a, b in snap_keeps(keeps, tcdiv)]
 
     m_tc = source_tc(master)
     m_base = df_to_frames(m_tc)

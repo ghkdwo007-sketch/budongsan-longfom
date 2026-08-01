@@ -60,7 +60,26 @@ def _find_server():
 
 
 def _default_temp():
-    """CEP 브리지가 파일을 주고받는 폴더. 패널의 Temp Directory 와 같아야 한다."""
+    """CEP 브리지가 파일을 주고받는 폴더. 패널의 Temp Directory 와 **같아야 한다.**
+
+    안 맞으면 서버는 명령 파일을 쓰고 패널은 다른 폴더를 보고 있어서 'Bridge response
+    timeout' 만 난다 — 패널은 멀쩡히 떠 있는데 붙지 않는다(맥에서 실제로 겪었다.
+    설치 스크립트는 /tmp 를 만드는데 서버 기본값은 $TMPDIR 아래였다).
+
+    그래서 **패널이 남긴 config.json 을 먼저 믿는다.** 패널이 Save Configuration 을
+    누를 때 자기 Temp Directory 를 거기에 적어 둔다.
+    """
+    for cand in ("/tmp/premiere-mcp-bridge",
+                 str(Path(tempfile.gettempdir()) / "premiere-mcp-bridge"),
+                 r"C:\temp\premiere-mcp-bridge"):
+        cfg = Path(cand) / "config.json"
+        if cfg.exists():
+            try:
+                d = json.loads(cfg.read_text(encoding="utf-8")).get("tempDirectory")
+                if d and os.path.isdir(d):
+                    return d
+            except (ValueError, OSError):
+                pass
     if os.name == "nt":
         return r"C:\temp\premiere-mcp-bridge"
     return str(Path(tempfile.gettempdir()) / "premiere-mcp-bridge")
